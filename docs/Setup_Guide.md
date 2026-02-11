@@ -171,6 +171,87 @@ These are enforced by the tooling, but good to know:
 
 ---
 
+## Merge Conflicts
+
+Merge conflicts happen when two people edit the same lines in the same file. Here's how to prevent them and handle them when they do occur.
+
+### Rules to Avoid Conflicts
+
+1. **Pull before you start working.** Every time you sit down to code, pull the latest `main` first:
+   ```bash
+   git checkout main
+   git pull
+   git checkout -b feature/your-new-branch
+   ```
+
+2. **Keep branches short-lived.** The longer your branch lives, the more `main` diverges from it. Aim to merge within 1-3 days.
+
+3. **Don't edit the same files as someone else at the same time.** Communicate with the team about what you're working on. A simple "I'm working on SkillService today" in the chat goes a long way.
+
+4. **Stay in your lane.** Stick to the files related to your feature:
+   - Working on a new enemy? Stay in `src/server/Services/EnemyService.luau` and `src/shared/Config/EnemyConfig.luau`.
+   - Working on UI? Stay in `src/client/UI/`.
+   - Avoid editing shared config files (`Config/`, `Remotes.luau`, `default.project.json`) unless your feature specifically requires it.
+
+5. **Keep commits small and focused.** One commit per logical change, not one giant commit with everything mixed together.
+
+6. **Rebase your branch on `main` regularly** if you're working on something for more than a day:
+   ```bash
+   git checkout main
+   git pull
+   git checkout feature/your-branch
+   git rebase main
+   ```
+
+### How to Resolve a Conflict
+
+If Git tells you there's a conflict when merging or rebasing:
+
+1. Open the conflicting file(s) in VS Code. You'll see markers like this:
+   ```
+   <<<<<<< HEAD
+   -- your version of the code
+   =======
+   -- the other person's version of the code
+   >>>>>>> feature/other-branch
+   ```
+
+2. VS Code shows buttons above each conflict: **Accept Current**, **Accept Incoming**, **Accept Both**. Choose the right one, or manually edit the code to combine both changes correctly.
+
+3. After resolving all conflicts in all files:
+   ```bash
+   git add .
+   git rebase --continue    (if rebasing)
+   git commit               (if merging)
+   ```
+
+4. **Test your code after resolving.** Connect Rojo and make sure nothing is broken in Studio.
+
+### High-Risk Files (Be Extra Careful)
+
+These files are most likely to cause conflicts because multiple people may need to edit them:
+
+| File | Why it's risky | What to do |
+|------|---------------|------------|
+| `src/shared/Remotes.luau` | Everyone adds remote events here | Coordinate before adding new remotes |
+| `src/shared/Config/*.luau` | Shared game config | Add new entries at the bottom of tables |
+| `default.project.json` | Rojo project mapping | Only edit if adding new top-level folders |
+| `src/client/init.client.luau` | Client bootstrap | Only edit to register new controllers |
+| `src/server/init.server.luau` | Server bootstrap | Only edit to register new services |
+
+### If Everything Goes Wrong
+
+If a rebase or merge gets messy and you're not sure what happened:
+
+```bash
+git rebase --abort    (cancels an in-progress rebase)
+git merge --abort     (cancels an in-progress merge)
+```
+
+This puts you back to where you were before you started. No damage done. Ask for help before trying again.
+
+---
+
 ## Common Commands
 
 | Command | What it does |
