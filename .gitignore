@@ -1,0 +1,21 @@
+# Roblox place files (binary - not suitable for Git)
+*.rbxl
+*.rbxlx
+
+# Roblox Studio lock files
+*.rbxlx.lock
+*.rbxl.lock
+
+# Rojo sourcemap (auto-generated)
+sourcemap.json
+
+# Wally packages (downloaded dependencies - run `wally install` to restore)
+/Packages/
+wally.lock
+
+# Manual backups (no longer needed with Git)
+/Backups/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,59 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Rojo: Serve",
+			"type": "shell",
+			"command": "rojo serve",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "always",
+				"panel": "new"
+			}
+		},
+		{
+			"label": "Rojo: Generate Sourcemap",
+			"type": "shell",
+			"command": "rojo sourcemap default.project.json --output sourcemap.json",
+			"group": "build",
+			"problemMatcher": []
+		},
+		{
+			"label": "Rojo: Sourcemap (Watch)",
+			"type": "shell",
+			"command": "rojo sourcemap default.project.json --output sourcemap.json --watch",
+			"group": "build",
+			"problemMatcher": [],
+			"isBackground": true,
+			"presentation": {
+				"reveal": "always",
+				"panel": "new"
+			}
+		},
+		{
+			"label": "Wally: Install Packages",
+			"type": "shell",
+			"command": "wally install",
+			"group": "build",
+			"problemMatcher": []
+		},
+		{
+			"label": "Selene: Lint",
+			"type": "shell",
+			"command": "selene src",
+			"group": "test",
+			"problemMatcher": []
+		},
+		{
+			"label": "StyLua: Format",
+			"type": "shell",
+			"command": "stylua src",
+			"group": "build",
+			"problemMatcher": []
+		}
+	]
+}
