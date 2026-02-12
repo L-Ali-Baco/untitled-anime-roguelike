@@ -5,7 +5,7 @@
 
 return {
 	-- Default class list (order matters for UI)
-	ClassOrder = { "Vanguard", "Gunner" },
+	ClassOrder = { "Vanguard", "Gunner", "BikerKing" },
 
 	-- Vanguard: Heavy melee fighter with custom character model
 	Vanguard = {
@@ -17,13 +17,13 @@ return {
 		AttackType = "Melee",
 		BaseHealth = 120,
 		MoveSpeedMultiplier = 1.15, -- Increased speed (was 0.95)
-		
+
 		-- Melee uses CombatConfig.Attacks (nil = use default)
 		Attacks = nil,
-		
+
 		-- Range for enemy highlight (easier to configure than calculating from hitbox)
 		HighlightRange = 15,
-		
+
 		-- Custom character model settings
 		CustomModel = "VanguardRig", -- Model name in ReplicatedStorage
 		RootPartName = "HumanoidRootPart", -- Name of the root part (instead of HumanoidRootPart)
@@ -43,7 +43,7 @@ return {
 		AttackType = "Ranged",
 		BaseHealth = 80,
 		MoveSpeedMultiplier = 1.1, -- Slightly faster
-		
+
 		-- Range for enemy highlight (matches Server/Targeting limits)
 		HighlightRange = 40,
 
@@ -78,6 +78,57 @@ return {
 			HitSparkColor = Color3.fromRGB(255, 150, 50),
 			HitSparkCount = 4,
 		},
+	},
+
+	-- Biker King: Fire-themed melee brawler with burn and mobility
+	BikerKing = {
+		DisplayName = "Biker King",
+		Description = "A fire-fueled brawler who ramps up speed and burns everything in his path",
+		Icon = "rbxassetid://6034509993", -- Placeholder: Impact
+		Color = Color3.fromRGB(255, 120, 30), -- Fire orange
+
+		AttackType = "Flamethrower",
+		BaseHealth = 100,
+		MoveSpeedMultiplier = 1.2,
+
+		-- Custom character model settings
+		CustomModel = "BikerKingRig",
+		RootPartName = "HumanoidRootPart",
+		IsCustomRig = true,
+		HipHeight = 5.0, -- Raised to prevent sinking into the floor
+		FacingOffset = 180,
+		RunAnimationId = "rbxassetid://0", -- Placeholder until real anim
+		IdleAnimationId = "rbxassetid://0", -- Placeholder until real anim
+
+		-- Flamethrower config (hold to fire)
+		FlamethrowerAttack = {
+			TickRate = 0.08,     -- Damage every 0.08s (~12 hits/sec)
+			Damage = 3,          -- 36 DPS base (plus stat scaling)
+			Range = 35,          -- Extended range
+			ConeAngle = 45,      -- Wider fan
+			WalkSpeedMultiplier = 0.6,
+			
+			-- Hybrid VFX Settings (Voxels + Strays)
+			-- 1. Voxels (The Main Volume - Thick & Stylized)
+			VoxelEnabled = true,
+			VoxelCountPerFrame = 6, -- Increased for thickness and turbulence
+			CubeStartSize = 1.0,    -- Thicker start
+			CubeEndSize = 5.0,      -- Massive expansion for volume
+			FlameSpeed = 45,        -- Base speed
+			
+			-- 2. Strays (Chaotic Embers/Sparks)
+			StraysEnabled = true,
+			StrayCountPerFrame = 3,
+			StraySpeed = 110,
+			StraySpread = 1.2,
+			StraySize = 0.3,
+			StrayLifetime = 0.35,
+			
+			LightBrightness = 6,
+			LightRange = 25,
+		},
+
+		HighlightRange = 35,
 	},
 
 	-- Server validation
