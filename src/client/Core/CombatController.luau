@@ -783,44 +783,6 @@ function handleAttackInput()
 end
 
 --[[
-    Update loop - handles auto-attack while holding
-]]
-local function onHeartbeat(deltaTime: number)
-	-- Check attack type based on class
-	local isRanged = ClassController
-		and ClassController:IsClassSelected()
-		and ClassController:GetAttackType() == "Ranged"
-
-	if isRanged then
-		-- Ranged: continuous fire while holding
-		if InputController:IsAttackHeld() then
-			local success, err = pcall(performRangedAttack)
-			if not success then
-				warn("[CombatController] Ranged attack error:", err)
-			end
-		end
-	else
-		-- Melee: auto-attack while holding attack button
-		if InputController:IsAttackHeld() and not isAttacking then
-			local timeSinceLastAttack = os.clock() - attackEndTime
-			local attackSpeedMult = StatLib:GetStat(LocalPlayer, "AttackRate", 1.0)
-			local autoInterval = ComboConfig.AutoAttackInterval / attackSpeedMult
-
-			if timeSinceLastAttack >= autoInterval then
-				startAttack()
-			end
-		end
-
-		-- Check combo timeout
-		if not isAttacking and currentComboHit > 0 then
-			local timeSinceLastAttack = os.clock() - lastAttackTime
-			if timeSinceLastAttack > ComboConfig.ResetTime then
-				currentComboHit = 0
-				CombatController.OnComboReset:Fire()
-			end
-		end
-	end
-end
 
 -- Public API --
 
@@ -1152,10 +1114,49 @@ end
 
 --[[
     Heartbeat handler
+    Handles auto-attacks for Melee, Ranged, and Flamethrower
 ]]
-local function onHeartbeat(dt)
+local function onHeartbeat(dt: number)
 	if isFlamethrowerActive then
 		handleFlamethrowerTick(dt)
+	end
+
+	-- Check attack type based on class
+	local attackType = nil
+	if ClassController and ClassController:IsClassSelected() then
+		attackType = ClassController:GetAttackType()
+	end
+
+	if attackType == "Ranged" then
+		-- Ranged: continuous fire while holding
+		if InputController:IsAttackHeld() then
+			local success, err = pcall(performRangedAttack)
+			if not success then
+				warn("[CombatController] Ranged attack error:", err)
+			end
+		end
+	elseif attackType == "Flamethrower" then
+		-- Flamethrower is handled by handleFlamethrowerTick above if isFlamethrowerActive is true
+	else
+		-- Melee/Default: auto-attack while holding attack button
+		if InputController:IsAttackHeld() and not isAttacking and not isFlamethrowerActive then
+			local timeSinceLastAttack = os.clock() - attackEndTime
+			local attackSpeedMult = StatLib:GetStat(LocalPlayer, "AttackRate", 1.0)
+			local autoInterval = ComboConfig.AutoAttackInterval / attackSpeedMult
+
+			if timeSinceLastAttack >= autoInterval then
+				startAttack()
+			end
+		end
+
+		-- Check combo timeout
+		if not isAttacking and currentComboHit > 0 then
+			local timeSinceLastAttack = os.clock() - lastAttackTime
+			if timeSinceLastAttack > ComboConfig.ResetTime then
+				currentComboHit = 0
+				CombatController.OnComboReset:Fire()
+			end
+		end
 	end
 end
 
