@@ -235,17 +235,19 @@ local function performDash()
 	-- Dash is a burst of speed that depreciates over time
 	local baseSpeed = humanoid.WalkSpeed
 	-- If standing still, assume base walk speed for dash start
-	if baseSpeed < 1 then baseSpeed = MovementConfig.WalkSpeed end
-	
+	if baseSpeed < 1 then
+		baseSpeed = MovementConfig.WalkSpeed
+	end
+
 	local dashSpeed = baseSpeed * (DashConfig.SpeedMultiplier or 3)
-	
+
 	-- Apply Item Modifiers (Boost distance/speed further)
 	-- We interpret "DashDistance" bonus as extra speed
 	local speedBonus = StatLib:GetStat(LocalPlayer, "DashDistance", 0)
 	if speedBonus > 0 then
 		dashSpeed = dashSpeed + (speedBonus * 2) -- Arbitrary scaling
 	end
-	
+
 	local dashVelocity = dashDirection * dashSpeed
 
 	-- Create BodyVelocity for smooth dash
@@ -258,9 +260,11 @@ local function performDash()
 	-- Tween velocity down (depreciation)
 	-- Slow down to normal speed by end of dash
 	local endVelocity = dashDirection * MovementConfig.WalkSpeed
-	TweenService:Create(bodyVelocity, TweenInfo.new(DashConfig.Duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Velocity = Vector3.new(endVelocity.X, 0, endVelocity.Z)
-	}):Play()
+	TweenService
+		:Create(bodyVelocity, TweenInfo.new(DashConfig.Duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Velocity = Vector3.new(endVelocity.X, 0, endVelocity.Z),
+		})
+		:Play()
 
 	-- Stop normal movement during dash
 	humanoid.WalkSpeed = 0
@@ -289,7 +293,7 @@ local function performDash()
 		-- Restore movement
 		humanoid.WalkSpeed = MovementConfig.WalkSpeed
 		MovementController:SetState(CharacterState.Idle)
-		
+
 		-- Preserve momentum
 		MovementController:SyncVelocity()
 

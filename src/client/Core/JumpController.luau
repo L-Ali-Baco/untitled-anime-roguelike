@@ -74,15 +74,15 @@ local function isGrounded(): boolean
 	if not rootPart then
 		return false
 	end
-	
+
 	-- Use raycast for grounded check (works for all rig types)
 	local rayOrigin = rootPart.Position
 	local rayDirection = Vector3.new(0, -4, 0)
-	
+
 	local raycastParams = RaycastParams.new()
-	raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+	raycastParams.FilterDescendantsInstances = { LocalPlayer.Character }
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	
+
 	local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
 	return result ~= nil
 end
@@ -125,13 +125,13 @@ local function performGroundJump()
 
 	-- Check if this is a custom rig
 	local isCustomRig = character:GetAttribute("IsCustomRig") == true
-	
+
 	if isCustomRig then
 		-- Custom rig: Apply jump using direct physics
 		local currentVel = rootPart.AssemblyLinearVelocity
 		-- Cancel any downward velocity and apply upward force
 		rootPart.AssemblyLinearVelocity = Vector3.new(currentVel.X, 0, currentVel.Z)
-		
+
 		-- Apply upward impulse
 		local jumpImpulse = Vector3.new(0, JumpConfig.Force * rootPart.AssemblyMass, 0)
 		rootPart:ApplyImpulse(jumpImpulse)

@@ -26,15 +26,17 @@ local discoveryUI = nil
 ]]
 local function notifyItemGain(itemKey: string, count: number)
 	local item = ItemRegistry.GetItem(itemKey)
-	if not item then return end
-	
+	if not item then
+		return
+	end
+
 	print("[ItemController] GAINED ITEM:", item.Name, "(Total: " .. count .. ")")
-	
+
 	-- Show proper pop-up
 	if discoveryUI then
 		discoveryUI.show(itemKey)
 	end
-	
+
 	-- Display a nice notification in the middle of the screen
 	-- For now, we'll use DamageNumbers system to float text over the player
 	if DamageNumbers then
@@ -52,7 +54,7 @@ local function onChestSpawned(position: Vector3)
 	-- Raycast down to find ground
 	local rayResult = workspace:Raycast(position + Vector3.new(0, 10, 0), Vector3.new(0, -20, 0))
 	local groundPos = rayResult and rayResult.Position or position
-	
+
 	-- Create impact particles
 	local part = Instance.new("Part")
 	part.Size = Vector3.new(1, 1, 1)
@@ -61,10 +63,10 @@ local function onChestSpawned(position: Vector3)
 	part.CanCollide = false
 	part.Transparency = 1
 	part.Parent = workspace
-	
+
 	local attachment = Instance.new("Attachment")
 	attachment.Parent = part
-	
+
 	local particles = Instance.new("ParticleEmitter")
 	particles.Color = ColorSequence.new(Color3.fromRGB(255, 200, 50))
 	particles.Size = NumberSequence.new({
@@ -75,9 +77,9 @@ local function onChestSpawned(position: Vector3)
 	particles.Speed = NumberRange.new(10, 20)
 	particles.Rate = 0
 	particles.Parent = attachment
-	
+
 	particles:Emit(30)
-	
+
 	game:GetService("Debris"):AddItem(part, 2)
 end
 
@@ -91,13 +93,13 @@ function ItemController:Init()
 	end
 
 	DamageNumbers = tryRequire(script.Parent.Parent.Parent.VFX.DamageNumbers)
-	
+
 	-- Initialize UI
 	local DiscoveryScreen = tryRequire(script.Parent.Parent.Parent.UI.Screens.ItemDiscoveryScreen)
 	if DiscoveryScreen then
 		discoveryUI = DiscoveryScreen.new()
 	end
-	
+
 	print("[ItemController] Initialized")
 end
 
@@ -107,13 +109,13 @@ function ItemController:Start()
 	if grantRemote then
 		grantRemote.OnClientEvent:Connect(notifyItemGain)
 	end
-	
+
 	-- Listen for chest spawns
 	local chestRemote = Remotes:GetEvent("ChestSpawned")
 	if chestRemote then
 		chestRemote.OnClientEvent:Connect(onChestSpawned)
 	end
-	
+
 	print("[ItemController] Started")
 end
 

@@ -27,21 +27,23 @@ local ItemDiscoveryScreen = {}
 ]]
 function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: () -> () }
 	local scope = scoped(Fusion)
-	
+
 	-- State
 	local isVisible = scope:Value(false)
 	local currentItemKey = scope:Value("")
 	local transparency = scope:Value(1)
-	
+
 	-- Computed data
 	local itemData = Computed(scope, function(use)
 		local key = use(currentItemKey)
 		return ItemRegistry.GetItem(key)
 	end)
-	
+
 	local rarityColor = Computed(scope, function(use)
 		local data = use(itemData)
-		if not data then return Color3.new(1, 1, 1) end
+		if not data then
+			return Color3.new(1, 1, 1)
+		end
 		return ItemRegistry.Rarities[data.Rarity] or Color3.new(1, 1, 1)
 	end)
 
@@ -55,7 +57,7 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 		IgnoreGuiInset = true,
 		DisplayOrder = 200, -- Top priority
 		Enabled = isVisible,
-		
+
 		[Children] = {
 			-- Main Notification Frame
 			scope:New("Frame")({
@@ -64,7 +66,7 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 				Position = UDim2.new(0.5, 0, 0.3, 0), -- Upper middle
 				Size = UDim2.new(0, 400, 0, 100),
 				BackgroundTransparency = 1,
-				
+
 				[Children] = {
 					-- Background Glow/Bar
 					scope:New("Frame")({
@@ -73,7 +75,7 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 						BackgroundColor3 = rarityColor,
 						BackgroundTransparency = transparency,
 					}),
-					
+
 					-- Item Name (Big)
 					scope:New("TextLabel")({
 						Name = "ItemName",
@@ -92,7 +94,7 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 							return 0.5 + (use(transparency) * 0.5)
 						end),
 					}),
-					
+
 					-- Rarity Label
 					scope:New("TextLabel")({
 						Name = "RarityLabel",
@@ -108,7 +110,7 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 						Font = Enum.Font.GothamBold,
 						TextSize = 14,
 					}),
-					
+
 					-- Description
 					scope:New("TextLabel")({
 						Name = "Description",
@@ -124,9 +126,9 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 						Font = Enum.Font.Gotham,
 						TextSize = 16,
 					}),
-				}
-			})
-		}
+				},
+			}),
+		},
 	})
 
 	local api = {
@@ -134,14 +136,14 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 			currentItemKey:set(itemKey)
 			isVisible:set(true)
 			transparency:set(1)
-			
+
 			-- Animate in
 			local tweenIn = TweenService:Create(
 				screenGui.NotificationFrame,
 				TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
 				{ Position = UDim2.new(0.5, 0, 0.35, 0) }
 			)
-			
+
 			-- Fade in state
 			task.spawn(function()
 				local start = tick()
@@ -151,10 +153,10 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 				end
 				transparency:set(0)
 			end)
-			
+
 			screenGui.NotificationFrame.Position = UDim2.new(0.5, 0, 0.25, 0)
 			tweenIn:Play()
-			
+
 			-- Wait then fade out
 			task.delay(2.5, function()
 				local start = tick()
@@ -166,10 +168,10 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 				isVisible:set(false)
 			end)
 		end,
-		
+
 		destroy = function()
 			Fusion.doCleanup(scope)
-		end
+		end,
 	}
 
 	return api

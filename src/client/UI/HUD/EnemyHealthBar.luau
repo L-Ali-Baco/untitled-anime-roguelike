@@ -545,17 +545,19 @@ end
 ]]
 function EnemyHealthBar:PredictDamage(enemy: Model, damage: number)
 	local data = activeHealthBars[enemy]
-	if not data then return end
-	
+	if not data then
+		return
+	end
+
 	-- Update health
 	local newHealth = math.max(0, data.CurrentHealth - damage)
 	data.CurrentHealth = newHealth
-	
+
 	-- Update visuals immediately
 	local healthPercent = newHealth / data.MaxHealth
 	data.FillBar.Size = UDim2.fromScale(healthPercent, 1)
 	data.FillBar.BackgroundColor3 = getHealthColor(healthPercent)
-	
+
 	-- Trigger flash effects
 	data.LastDamageTime = os.clock()
 	flashEnemyModel(data)
@@ -570,34 +572,34 @@ local function updateHealthBar(data: HealthBarData, deltaTime: number)
 	if not data.Enemy or not data.Enemy.Parent then
 		return
 	end
-	
+
 	-- Always update distance-based visibility first (even for dead/invalid enemies)
 	-- This ensures billboards show up for enemies that spawn out of range
 	local character = LocalPlayer.Character
 	local distance = math.huge -- Default to far away
-	
+
 	if character then
 		local playerRoot = character:FindFirstChild("HumanoidRootPart")
 		local enemyRoot = data.Enemy:FindFirstChild("HumanoidRootPart") or data.Enemy.PrimaryPart
 
 		if playerRoot and enemyRoot then
 			distance = (playerRoot.Position - enemyRoot.Position).Magnitude
-			
+
 			-- Update in-range highlight
 			updateInRangeHighlight(data, distance)
 		end
 	end
-	
+
 	-- Calculate transparency based on distance
 	local transparency = 0
 	if distance > Config.FadeStartDistance then
 		transparency = (distance - Config.FadeStartDistance) / (Config.MaxDistance - Config.FadeStartDistance)
 		transparency = math.clamp(transparency, 0, 1)
 	end
-	
+
 	-- Apply billboard visibility (always do this)
 	data.Billboard.Enabled = transparency < 1
-	
+
 	-- Validate Adornee is still valid
 	if data.Billboard.Enabled and not data.Billboard.Adornee then
 		local head = data.Enemy:FindFirstChild("Head")
@@ -607,9 +609,9 @@ local function updateHealthBar(data: HealthBarData, deltaTime: number)
 			data.Billboard.Adornee = attachPart
 		end
 	end
-	
+
 	local humanoid = data.Humanoid
-	
+
 	-- Try to re-acquire humanoid if it became invalid
 	if not humanoid or not humanoid.Parent then
 		humanoid = data.Enemy:FindFirstChildOfClass("Humanoid")
@@ -619,7 +621,7 @@ local function updateHealthBar(data: HealthBarData, deltaTime: number)
 			data.CurrentHealth = humanoid.Health
 		end
 	end
-	
+
 	-- Skip health bar updates if humanoid is dead/invalid (but visibility was already updated above)
 	if not humanoid or humanoid.Health <= 0 then
 		return
@@ -642,7 +644,7 @@ local function updateHealthBar(data: HealthBarData, deltaTime: number)
 
 	local delayedPercent = data.DelayedHealth / data.MaxHealth
 	data.DamageBar.Size = UDim2.fromScale(math.max(0, delayedPercent), 1)
-	
+
 	-- Hide when at full health (optional)
 	if Config.ShowWhenFullHealth == false and healthPercent >= 1 then
 		data.Billboard.Enabled = false
@@ -736,7 +738,7 @@ function EnemyHealthBar:Init()
 					if enemyRoot then
 						local distance = (playerRoot.Position - enemyRoot.Position).Magnitude
 						-- Reset in-range state to force a refresh
-						data.IsInRange = false 
+						data.IsInRange = false
 						if data.Highlight then
 							data.Highlight.FillTransparency = 1
 							data.Highlight.OutlineTransparency = 1
@@ -758,55 +760,55 @@ function EnemyHealthBar:Init()
 	end
 
 	-- Listen for both 'Enemy' and 'TrainingDummy'
-	local tags = {CombatConfig.Targeting.TargetTag, "TrainingDummy"}
-	
+	local tags = { CombatConfig.Targeting.TargetTag, "TrainingDummy" }
+
 	for _, tag in tags do
 		-- Existing
 		for _, enemy in CollectionService:GetTagged(tag) do
 			onPotentialEnemy(enemy)
 		end
-		
+
 		-- New (tag added)
 		CollectionService:GetInstanceAddedSignal(tag):Connect(onPotentialEnemy)
-		
+
 		-- Removed
 		CollectionService:GetInstanceRemovedSignal(tag):Connect(function(enemy)
 			self:RemoveHealthBar(enemy)
 		end)
 	end
-	
+
 	-- ADDITIONAL: Watch for models with Humanoid being added to workspace
 	-- This catches enemies that spawn before the tag replicates to client
 	local function checkForEnemy(instance)
 		if not instance:IsA("Model") then
 			return
 		end
-		
+
 		-- Wait a short moment for tags to replicate
 		task.delay(0.1, function()
 			if not instance.Parent then
 				return -- Already removed
 			end
-			
+
 			-- Check if it has a humanoid and matches enemy type names
 			local humanoid = instance:FindFirstChildOfClass("Humanoid")
 			if not humanoid then
 				return
 			end
-			
+
 			-- Check if tagged as enemy or training dummy
 			local isEnemy = CollectionService:HasTag(instance, CombatConfig.Targeting.TargetTag)
 			local isDummy = CollectionService:HasTag(instance, "TrainingDummy")
-			
+
 			if isEnemy or isDummy then
 				onPotentialEnemy(instance)
 			end
 		end)
 	end
-	
+
 	-- Listen for descendants added to workspace (catches spawning enemies)
 	workspace.DescendantAdded:Connect(checkForEnemy)
-	
+
 	-- Also scan workspace now for any models that might have been missed
 	task.defer(function()
 		for _, instance in workspace:GetDescendants() do

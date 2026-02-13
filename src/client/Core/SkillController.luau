@@ -34,15 +34,23 @@ local function playLocalFeedback(slot)
 	-- Find skill data
 	local className = "Vanguard"
 	if ClassController and ClassController:IsClassSelected() then
-		local cls = ClassController:GetCurrentClass() 
-		if cls == "Warrior" then className = "Vanguard" end
-		if cls == "Gunner" then className = "Gunslinger" end
+		local cls = ClassController:GetCurrentClass()
+		if cls == "Warrior" then
+			className = "Vanguard"
+		elseif cls == "Gunner" then
+			className = "Gunslinger"
+		else
+			-- Use class name directly (BikerKing, etc.)
+			className = cls
+		end
 	end
-	
+
 	local skills = SkillConfig[className]
-	if not skills or not skills[slot] then return end
+	if not skills or not skills[slot] then
+		return
+	end
 	local skillData = skills[slot]
-	
+
 	if SkillVFX then
 		SkillVFX:PlaySkillEffect(Players.LocalPlayer, skillData)
 	end
@@ -52,16 +60,16 @@ end
     Attempt to use a skill
 ]]
 local function tryUseSkill(slot: string)
-	if not ClassController then 
+	if not ClassController then
 		warn("SkillController: ClassController missing")
-		return 
+		return
 	end
-	
-	if not ClassController:IsClassSelected() then 
+
+	if not ClassController:IsClassSelected() then
 		warn("SkillController: No class selected")
-		return 
+		return
 	end
-	
+
 	-- Check local cooldown
 	local now = tick()
 	local cdEnd = localCooldowns[slot] or 0
@@ -69,15 +77,15 @@ local function tryUseSkill(slot: string)
 		print("Skill on cooldown")
 		return
 	end
-	
+
 	print("Requesting skill:", slot)
-	
+
 	-- Send request (Target info removed/ignored as per directional change)
 	local remote = Remotes:GetEvent("RequestSkill")
 	if remote then
 		remote:FireServer(slot)
 	end
-	
+
 	-- PREDICT: Assume success for VFX feel
 	playLocalFeedback(slot)
 end
@@ -88,10 +96,10 @@ end
 local function onSkillUsed(player, slot, skillData)
 	if player == Players.LocalPlayer then
 		print("Used Skill (Server Confirmed):", skillData.Name)
-		
+
 		-- Ensure local cooldown is synced
 		localCooldowns[slot] = tick() + skillData.Cooldown
-		
+
 		-- VFX already played via prediction, or played by SkillVFX listening to remote
 		-- We don't need to do anything else here for local player
 	else
@@ -111,12 +119,12 @@ end
 function SkillController:Init()
 	InputController = require(script.Parent.InputController)
 	ClassController = require(script.Parent.Parent.Features.Class.ClassController)
-	
+
 	-- Try require optional modules
 	pcall(function()
 		TargetingController = require(script.Parent.Parent.Features.Combat.TargetingController)
 	end)
-	
+
 	-- Try require VFX
 	local success, result = pcall(function()
 		return require(script.Parent.Parent.VFX.SkillVFX)
@@ -124,35 +132,44 @@ function SkillController:Init()
 	if success then
 		SkillVFX = result
 	end
-	
+
 	print("[SkillController] Initialized")
 end
 
 function SkillController:Start()
 	-- Input Listeners
-	table.insert(connections, InputController.OnSecondaryPressed:Connect(function()
-		tryUseSkill("Secondary")
-	end))
-	
-	table.insert(connections, InputController.OnSkill1Pressed:Connect(function()
-		tryUseSkill("Skill1")
-	end))
-	
-	table.insert(connections, InputController.OnSkill2Pressed:Connect(function()
-		tryUseSkill("Skill2")
-	end))
-	
+	table.insert(
+		connections,
+		InputController.OnSecondaryPressed:Connect(function()
+			tryUseSkill("Secondary")
+		end)
+	)
+
+	table.insert(
+		connections,
+		InputController.OnSkill1Pressed:Connect(function()
+			tryUseSkill("Skill1")
+		end)
+	)
+
+	table.insert(
+		connections,
+		InputController.OnSkill2Pressed:Connect(function()
+			tryUseSkill("Skill2")
+		end)
+	)
+
 	-- Network Listeners
 	local usedRemote = Remotes:GetEvent("SkillUsed")
 	if usedRemote then
 		table.insert(connections, usedRemote.OnClientEvent:Connect(onSkillUsed))
 	end
-	
+
 	local cdRemote = Remotes:GetEvent("SkillCooldown")
 	if cdRemote then
 		table.insert(connections, cdRemote.OnClientEvent:Connect(onSkillCooldown))
 	end
-	
+
 	print("[SkillController] Started")
 end
 

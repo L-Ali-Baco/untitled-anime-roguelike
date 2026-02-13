@@ -160,7 +160,7 @@ return {
 	-- Server validation
 	Server = {
 		MaxAttackRange = 40, -- Max range for valid hit (anti-cheat, increased)
-		MinAttackInterval = 0.2, -- Min time between attacks (rate limit)
+		MinAttackInterval = 0.05, -- Min time between attacks (rate limit, lowered for flamethrower)
 		DamageMultiplier = 1.0, -- Global damage scaling
 	},
 }

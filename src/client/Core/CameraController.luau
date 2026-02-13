@@ -110,12 +110,12 @@ local function onRenderStepped(deltaTime: number)
 	if not characterPos then
 		return
 	end
-    
-    -- Safety check: If target falls into void, stop tracking to avoid camera glitching
-    if characterPos.Y < -50 then
-        -- Don't update camera position if target is falling into void
-        return
-    end
+
+	-- Safety check: If target falls into void, stop tracking to avoid camera glitching
+	if characterPos.Y < -50 then
+		-- Don't update camera position if target is falling into void
+		return
+	end
 
 	-- Get look delta from input controller
 	local lookDelta = InputController:GetLookDelta()
@@ -170,7 +170,7 @@ local function initializeForCharacter(character: Model)
 		warn("[CameraController] Failed to find Humanoid")
 		return
 	end
-	
+
 	-- Use CharacterLib to find root part (supports custom rigs)
 	-- Wait a moment for the character to fully load
 	task.wait(0.1)

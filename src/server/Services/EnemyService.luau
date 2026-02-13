@@ -243,7 +243,7 @@ local function moveTowardTarget(enemyData: EnemyData)
 			needsNewMove = true
 		end
 	end
-	
+
 	-- Unstuck Logic: Check if we are moving but stuck in place
 	if enemyData.IsMoving then
 		if not enemyData.LastPos then
@@ -355,15 +355,15 @@ local function performAttack(enemyData: EnemyData)
 
 		-- Deal damage (Shield Logic)
 		local damage = config.Damage or 5
-		
+
 		-- Apply Damage Resistance
 		local resistance = character:GetAttribute("DamageResistance") or 0
 		if resistance > 0 then
 			damage = damage * (1 - math.clamp(resistance, 0, 1))
 		end
-		
+
 		local currentShield = character:GetAttribute("Shield") or 0
-		
+
 		if currentShield > 0 then
 			if currentShield >= damage then
 				character:SetAttribute("Shield", currentShield - damage)
@@ -373,7 +373,7 @@ local function performAttack(enemyData: EnemyData)
 				character:SetAttribute("Shield", 0)
 			end
 		end
-		
+
 		if damage > 0 then
 			targetHumanoid:TakeDamage(damage)
 		end
@@ -488,7 +488,7 @@ local function updateEnemyAI(enemyData: EnemyData, deltaTime: number)
 			end
 		end)
 	end
-	
+
 	-- Broadcast state change if it happened
 	if enemyData.State ~= oldState then
 		local stateRemote = Remotes:GetEvent("EnemyStateChanged")
@@ -512,7 +512,7 @@ function EnemyService:ApplyHitstun(enemyModel: Model, duration: number?)
 	if not enemyData then
 		return
 	end
-	
+
 	-- Don't apply hitstun if already dead
 	if enemyData.State == AIState.Dead then
 		return
@@ -528,16 +528,16 @@ function EnemyService:ApplyHitstun(enemyModel: Model, duration: number?)
 		local oldState = enemyData.State
 		enemyData.State = AIState.Hitstun
 		enemyData.HitstunEndTime = tick() + hitstunDuration
-		
+
 		-- Reset movement state (stops MoveTo from being called)
 		enemyData.IsMoving = false
 		enemyData.LastMoveTarget = nil
-		
+
 		-- Stop the Humanoid from moving on its own
 		-- MoveTo to current position stops pathfinding without affecting velocity
 		local currentPos = enemyData.RootPart.Position
 		enemyData.Humanoid:MoveTo(currentPos)
-		
+
 		-- IMPORTANT: Delay velocity zeroing to allow knockback to play out
 		-- Knockback was already applied by CombatService before this function
 		-- Wait 0.15s to let enemy visibly move from knockback before stopping
@@ -549,12 +549,12 @@ function EnemyService:ApplyHitstun(enemyModel: Model, duration: number?)
 			if enemyData.State ~= AIState.Hitstun then
 				return -- State changed, don't mess with velocity
 			end
-			
+
 			-- Now zero horizontal velocity to stop sliding
 			local currentVel = enemyData.RootPart.AssemblyLinearVelocity
 			enemyData.RootPart.AssemblyLinearVelocity = Vector3.new(0, math.min(currentVel.Y, 0), 0)
 		end)
-		
+
 		-- Broadcast state change
 		if oldState ~= AIState.Hitstun then
 			local stateRemote = Remotes:GetEvent("EnemyStateChanged")
@@ -597,7 +597,7 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 	local healthMultiplier = 1.0
 	local speedMultiplier = 1.0
 	local damageMultiplier = 1.0
-	
+
 	-- Get difficulty multipliers from Director if available
 	local DirectorService = _G.DirectorService
 	if DirectorService and DirectorService:IsRunning() then
@@ -606,23 +606,23 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 		speedMultiplier = multipliers.Speed
 		damageMultiplier = multipliers.Damage
 	end
-	
+
 	-- Apply scaled stats
 	local scaledHealth = math.floor(config.Health * healthMultiplier)
 	local scaledSpeed = config.WalkSpeed * speedMultiplier
 	local scaledDamage = config.Damage * damageMultiplier
-	
+
 	humanoid.MaxHealth = scaledHealth
 	humanoid.Health = scaledHealth
 	humanoid.WalkSpeed = scaledSpeed
-	
+
 	-- Store scaled damage in config copy for this enemy
 	local scaledConfig = {}
 	for k, v in config do
 		scaledConfig[k] = v
 	end
 	scaledConfig.Damage = scaledDamage
-	
+
 	-- Store multipliers on model for debugging
 	enemyModel:SetAttribute("HealthMultiplier", healthMultiplier)
 	enemyModel:SetAttribute("DamageMultiplier", damageMultiplier)
@@ -630,13 +630,13 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 
 	-- Tag as enemy for targeting system
 	CollectionService:AddTag(enemyModel, CombatConfig.Targeting.TargetTag)
-	
+
 	-- Set network owner to server (nil) for authoritative physics
 	-- This prevents client-side physics interference and teleportation issues
 	if rootPart:IsA("BasePart") then
 		rootPart:SetNetworkOwner(nil)
 	end
-	
+
 	-- Apply collision group
 	for _, part in enemyModel:GetDescendants() do
 		if part:IsA("BasePart") then
@@ -680,7 +680,7 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 				Position = rootPart.Position,
 			})
 		end
-		
+
 		-- Immediately disable physics interactions that block shots
 		for _, part in enemyModel:GetDescendants() do
 			if part:IsA("BasePart") then
@@ -757,7 +757,7 @@ function EnemyService:SpawnEnemy(enemyType: string, position: Vector3, parent: I
 	torso.Position = position
 	torso.Anchored = false
 	torso.CanCollide = true
-	
+
 	-- Color based on type
 	if enemyType == "Brute" then
 		torso.Color = Color3.fromRGB(200, 50, 50) -- Dark Red
@@ -767,7 +767,7 @@ function EnemyService:SpawnEnemy(enemyType: string, position: Vector3, parent: I
 	else
 		torso.Color = Color3.fromRGB(150, 150, 150) -- Grey Minion
 	end
-	
+
 	torso.Parent = enemyModel
 
 	local head = Instance.new("Part")

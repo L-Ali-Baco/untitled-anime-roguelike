@@ -41,22 +41,24 @@ end
 ]]
 function ItemService:GrantItem(player: Player, itemKey: string)
 	local item = ItemRegistry.GetItem(itemKey)
-	if not item then return end
-	
+	if not item then
+		return
+	end
+
 	if not inventories[player] then
 		inventories[player] = {}
 	end
-	
+
 	inventories[player][itemKey] = (inventories[player][itemKey] or 0) + 1
-	
+
 	-- Notify client
 	local grantRemote = Remotes:GetEvent("GrantItem")
 	if grantRemote then
 		grantRemote:FireClient(player, itemKey, inventories[player][itemKey])
 	end
-	
+
 	print("[ItemService] Granted", item.Name, "to", player.Name)
-	
+
 	-- Apply immediate stat boosts if needed (Health, etc.)
 	-- Movement stats are handled by client reading attributes or state
 	self:UpdatePlayerAttributes(player)
@@ -67,8 +69,10 @@ end
 ]]
 function ItemService:UpdatePlayerAttributes(player: Player)
 	local inv = inventories[player]
-	if not inv then return end
-	
+	if not inv then
+		return
+	end
+
 	for itemKey, count in pairs(inv) do
 		player:SetAttribute("Item_" .. itemKey, count)
 	end
@@ -87,7 +91,7 @@ function ItemService:SpawnChest(position: Vector3)
 	chest.Anchored = true
 	chest.CanCollide = true
 	chest.Parent = workspace
-	
+
 	-- Add ProximityPrompt for interaction
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.ActionText = "Open Chest"
@@ -96,14 +100,14 @@ function ItemService:SpawnChest(position: Vector3)
 	prompt.MaxActivationDistance = 15 -- Increased range
 	prompt.RequiresLineOfSight = false -- More reliable on mobile/busy screens
 	prompt.Parent = chest
-	
+
 	activeChests[chest] = true
 	CollectionService:AddTag(chest, "LootChest")
-	
+
 	prompt.Triggered:Connect(function(player)
 		self:OpenChest(chest, player)
 	end)
-	
+
 	-- Notify clients for VFX
 	local spawnRemote = Remotes:GetEvent("ChestSpawned")
 	if spawnRemote then
@@ -115,13 +119,15 @@ end
     Handle opening a chest
 ]]
 function ItemService:OpenChest(chest: Instance, player: Player)
-	if not activeChests[chest] then return end
+	if not activeChests[chest] then
+		return
+	end
 	activeChests[chest] = nil
-	
+
 	-- Grant random item
 	local itemKey = getRandomItemKey()
 	self:GrantItem(player, itemKey)
-	
+
 	-- Cleanup chest
 	chest:Destroy()
 end
@@ -138,7 +144,7 @@ local function setupDebugCommands()
 		player.Chatted:Connect(function(msg)
 			local args = string.split(msg, " ")
 			local cmd = string.lower(args[1])
-			
+
 			if cmd == "/give" then
 				local itemKey = args[2]
 				-- Partial match search
@@ -159,9 +165,9 @@ function ItemService:Start()
 	Players.PlayerRemoving:Connect(function(player)
 		inventories[player] = nil
 	end)
-	
+
 	setupDebugCommands()
-	
+
 	print("[ItemService] Started")
 end
 

@@ -60,7 +60,12 @@ end
     Multiple hits with the SAME attackId are allowed (different targets in one swing).
     Rate limiting only applies when attackId changes (new attack).
 ]]
-local function validateAttack(player: Player, attackIndex: number, targetModel: Model?, attackId: string?): (boolean, string?)
+local function validateAttack(
+	player: Player,
+	attackIndex: number,
+	targetModel: Model?,
+	attackId: string?
+): (boolean, string?)
 	-- Check player has character
 	local character = player.Character
 	if not character then
@@ -81,7 +86,7 @@ local function validateAttack(player: Player, attackIndex: number, targetModel: 
 	local ClassService = require(script.Parent.ClassService)
 	local className = ClassService:GetPlayerClass(player) or "Warrior"
 	local classData = ClassConfig[className]
-	
+
 	-- Determine rate limit based on class
 	local minInterval = CombatConfig.Server.MinAttackInterval
 	if className == "Gunner" then
@@ -89,14 +94,14 @@ local function validateAttack(player: Player, attackIndex: number, targetModel: 
 	elseif className == "Warrior" then
 		minInterval = CombatConfig.Combo.AutoAttackInterval
 	end
-	
+
 	-- Apply Attack Speed multiplier from items
 	-- Higher attack speed = Lower interval
 	local attackSpeedMult = StatLib:GetStat(player, "AttackRate", 1.0)
 	minInterval = minInterval / attackSpeedMult
-	
+
 	-- Add small grace period for latency variance (ping jitter)
-	minInterval = minInterval * 0.9 
+	minInterval = minInterval * 0.9
 
 	-- Rate limiting (anti-cheat)
 	-- IMPORTANT: Skip rate limit if this is the same attack (AOE hitting multiple targets)
@@ -104,7 +109,7 @@ local function validateAttack(player: Player, attackIndex: number, targetModel: 
 	local now = tick()
 	local lastAttack = playerLastAttack[player] or 0
 	local lastAttackId = playerLastAttackId[player]
-	
+
 	-- Only rate limit if this is a NEW attack (different attackId)
 	if attackId and lastAttackId == attackId then
 		-- Same attack, allow through (AOE multi-hit)
@@ -167,7 +172,7 @@ local function applyKnockback(attacker: Model, target: Model, knockbackForce: nu
 	-- Calculate knockback direction (from attacker to target, horizontal only)
 	local direction = (targetRoot.Position - attackerRoot.Position)
 	direction = Vector3.new(direction.X, 0, direction.Z)
-	
+
 	if direction.Magnitude < 0.1 then
 		-- Attacker and target are too close, use attacker's facing direction
 		direction = attackerRoot.CFrame.LookVector
@@ -179,7 +184,7 @@ local function applyKnockback(attacker: Model, target: Model, knockbackForce: nu
 	-- knockbackForce is typically 5-12, so multiply by 2-3 for reasonable push
 	local knockbackSpeed = knockbackForce * 2.5
 	local upwardPop = 3 -- Small upward component for visual "hit" feel
-	
+
 	local knockbackVelocity = direction * knockbackSpeed + Vector3.new(0, upwardPop, 0)
 
 	-- Apply velocity directly (works during hitstun when MoveTo is paused)
@@ -223,7 +228,7 @@ local function processDamage(attacker: Player, target: Model, attackIndex: numbe
 	-- Base damage from attack data -> Modified by Items -> Global Multiplier
 	local damage = StatLib:GetStat(attacker, "Damage", attackData.Damage)
 	damage = damage * CombatConfig.Server.DamageMultiplier
-	
+
 	-- Calculate Critical Hit
 	local critChance = StatLib:GetStat(attacker, "CritChance", 0) -- Base 0%
 	local isCrit = math.random() <= critChance
@@ -240,7 +245,7 @@ local function processDamage(attacker: Player, target: Model, attackIndex: numbe
 	-- Apply damage (Shield Logic)
 	local targetCharacter = target -- Model is the character
 	local currentShield = targetCharacter:GetAttribute("Shield") or 0
-	
+
 	if currentShield > 0 then
 		if currentShield >= damage then
 			-- Shield absorbs all damage
@@ -253,7 +258,7 @@ local function processDamage(attacker: Player, target: Model, attackIndex: numbe
 			targetCharacter:SetAttribute("Shield", 0)
 		end
 	end
-	
+
 	if damage > 0 then
 		humanoid:TakeDamage(damage)
 	end
@@ -263,7 +268,7 @@ local function processDamage(attacker: Player, target: Model, attackIndex: numbe
 	if attackerCharacter then
 		applyKnockback(attackerCharacter, target, attackData.Knockback)
 	end
-	
+
 	-- Process On-Hit Effects
 	if ProcService then
 		ProcService:ProcessHit(attacker, target, damage, isCrit)
@@ -271,7 +276,7 @@ local function processDamage(attacker: Player, target: Model, attackIndex: numbe
 
 	-- Check if target died
 	local targetDied = humanoid.Health <= 0
-	
+
 	if targetDied and ProcService then
 		ProcService:ProcessKill(attacker, target)
 	end
@@ -282,66 +287,79 @@ end
 --[[
     Handle attack request from client
 ]]
-local function onRequestAttack(player: Player, attackIndex: number, targetModel: Model?, attackId: string)
-	-- Validate the attack (pass attackId for AOE rate limit bypass)
-	local isValid, errorReason = validateAttack(player, attackIndex, targetModel, attackId)
+local function onRequestAttack(player: Player, attackIndex: number, targetOrTargets: any, attackId: any)
+	-- Normalize input to list of targets
+	local targets = {}
+	if typeof(targetOrTargets) == "Instance" then
+		targets = {targetOrTargets}
+	elseif type(targetOrTargets) == "table" then
+		targets = targetOrTargets
+	end
+
+	-- Validate rate limit (check against first target or nil)
+	-- This checks if the *batch* is allowed at this time
+	-- We use targets[1] to validate distance/health for at least one target if present
+	local checkTarget = targets[1]
+	local isValid, errorReason = validateAttack(player, attackIndex, checkTarget, attackId)
+	
 	if not isValid then
-		warn("[CombatService] Invalid attack from", player.Name, ":", errorReason)
+		-- Suppress "Attack too fast" warnings for rapid fire
+		if errorReason ~= "Attack too fast" then
+			-- warn("[CombatService] Invalid attack from", player.Name, ":", errorReason)
+		end
 		return
 	end
 
-	-- Update last attack time and ID (only if this is a new attack)
+	-- Process all targets
+	-- Note: We haven't updated playerLastAttack yet, so validateAttack will pass rate checks for all targets in this batch
+	for _, target in targets do
+		local tValid, tError = validateAttack(player, attackIndex, target, attackId)
+		if tValid then
+			local didDamage, targetDied = processDamage(player, target, attackIndex, attackId)
+			
+			if didDamage then
+				-- Get attack data for VFX info
+				local attackData = CombatConfig.Attacks[attackIndex]
+
+				-- Get hit position (target's position)
+				local targetRoot = getTargetRoot(target)
+				local hitPosition = targetRoot and targetRoot.Position or Vector3.zero
+
+				-- Send hit confirmation to ALL clients (for VFX)
+				local hitConfirmedRemote = Remotes:GetEvent("HitConfirmed")
+				if hitConfirmedRemote then
+					hitConfirmedRemote:FireAllClients({
+						Attacker = player,
+						Target = target,
+						AttackIndex = attackIndex,
+						HitPosition = hitPosition,
+						Hitstop = attackData.Hitstop,
+						ScreenShake = attackData.ScreenShake,
+						TargetDied = targetDied,
+					})
+				end
+
+				-- If target died, fire death event
+				if targetDied then
+					local enemyDiedRemote = Remotes:GetEvent("EnemyDied")
+					if enemyDiedRemote then
+						enemyDiedRemote:FireAllClients({
+							Target = target,
+							Killer = player,
+							Position = hitPosition,
+						})
+					end
+					print("[CombatService]", player.Name, "killed", target.Name)
+				end
+			end
+		end
+	end
+
+	-- Update last attack time and ID (Close the rate limit window)
 	local lastAttackId = playerLastAttackId[player]
 	if attackId ~= lastAttackId then
 		playerLastAttack[player] = tick()
 		playerLastAttackId[player] = attackId
-	end
-
-	-- If no target, nothing more to do (swing at air)
-	if not targetModel then
-		return
-	end
-
-	-- Process damage
-	local didDamage, targetDied = processDamage(player, targetModel, attackIndex, attackId)
-
-	if not didDamage then
-		return
-	end
-
-	-- Get attack data for VFX info
-	local attackData = CombatConfig.Attacks[attackIndex]
-
-	-- Get hit position (target's position)
-	local targetRoot = getTargetRoot(targetModel)
-	local hitPosition = targetRoot and targetRoot.Position or Vector3.zero
-
-	-- Send hit confirmation to ALL clients (for VFX)
-	local hitConfirmedRemote = Remotes:GetEvent("HitConfirmed")
-	if hitConfirmedRemote then
-		hitConfirmedRemote:FireAllClients({
-			Attacker = player,
-			Target = targetModel,
-			AttackIndex = attackIndex,
-			HitPosition = hitPosition,
-			Hitstop = attackData.Hitstop,
-			ScreenShake = attackData.ScreenShake,
-			TargetDied = targetDied,
-		})
-	end
-
-	-- If target died, fire death event
-	if targetDied then
-		local enemyDiedRemote = Remotes:GetEvent("EnemyDied")
-		if enemyDiedRemote then
-			enemyDiedRemote:FireAllClients({
-				Target = targetModel,
-				Killer = player,
-				Position = hitPosition,
-			})
-		end
-
-		print("[CombatService]", player.Name, "killed", targetModel.Name)
 	end
 
 	-- Cleanup attack hit tracking after a short delay
@@ -387,7 +405,7 @@ local function validateRangedAttack(player: Player, targetModel: Model?, hitPosi
 	if not targetModel then
 		return true, nil
 	end
-	
+
 	-- NOTE: Aim angle validation REMOVED
 	-- The client has auto-aim that rotates the character to face targets,
 	-- but this rotation may not replicate to server fast enough when moving.
@@ -468,7 +486,7 @@ local function processRangedDamage(
 	-- Calculate damage
 	local baseDamage = rangedData.Damage
 	local damage = StatLib:GetStat(attacker, "Damage", baseDamage) * (CombatConfig.Server.DamageMultiplier or 1)
-	
+
 	-- Calculate Critical Hit
 	local critChance = StatLib:GetStat(attacker, "CritChance", 0)
 	local isCrit = math.random() <= critChance
@@ -484,7 +502,7 @@ local function processRangedDamage(
 
 	-- Apply damage (Shield Logic)
 	local currentShield = target:GetAttribute("Shield") or 0
-	
+
 	if currentShield > 0 then
 		if currentShield >= damage then
 			target:SetAttribute("Shield", currentShield - damage)
@@ -498,7 +516,7 @@ local function processRangedDamage(
 	if damage > 0 then
 		humanoid:TakeDamage(damage)
 	end
-	
+
 	print("[CombatService] Dealt", damage, "ranged damage to", target.Name, "- HP:", humanoid.Health)
 
 	-- Process On-Hit Effects
@@ -515,7 +533,7 @@ local function processRangedDamage(
 	-- Check if target died
 	local targetDied = humanoid.Health <= 0
 	print("[CombatService] processRangedDamage: Target health after damage:", humanoid.Health, "died:", targetDied)
-	
+
 	if targetDied and ProcService then
 		ProcService:ProcessKill(attacker, target)
 	end
@@ -610,7 +628,7 @@ end
 ]]
 function CombatService:Start()
 	print("[CombatService] Starting...")
-	
+
 	-- Load ProcService
 	ProcService = require(script.Parent.ProcService)
 

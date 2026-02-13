@@ -29,12 +29,19 @@ local beaconUIs = {}
     Create progress UI for a beacon
 ]]
 local function createBeaconUI(instance: Instance)
-	if not instance then return end
-	if beaconUIs[instance] then return end
-	
-	local posPart = (instance:IsA("BasePart") and instance) or (instance:IsA("Model") and (instance.PrimaryPart or instance:FindFirstChildWhichIsA("BasePart")))
-	if not posPart then return end
-	
+	if not instance then
+		return
+	end
+	if beaconUIs[instance] then
+		return
+	end
+
+	local posPart = (instance:IsA("BasePart") and instance)
+		or (instance:IsA("Model") and (instance.PrimaryPart or instance:FindFirstChildWhichIsA("BasePart")))
+	if not posPart then
+		return
+	end
+
 	-- Create Billboard
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "BeaconProgressUI"
@@ -44,7 +51,7 @@ local function createBeaconUI(instance: Instance)
 	billboard.LightInfluence = 0
 	billboard.Adornee = posPart
 	billboard.Parent = posPart
-	
+
 	-- Background
 	local bg = Instance.new("Frame")
 	bg.Name = "Background"
@@ -52,11 +59,11 @@ local function createBeaconUI(instance: Instance)
 	bg.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 	bg.BackgroundTransparency = 0.3
 	bg.Parent = billboard
-	
+
 	local bgCorner = Instance.new("UICorner")
 	bgCorner.CornerRadius = UDim.new(0, 4)
 	bgCorner.Parent = bg
-	
+
 	-- Fill Bar
 	local fill = Instance.new("Frame")
 	fill.Name = "Fill"
@@ -64,11 +71,11 @@ local function createBeaconUI(instance: Instance)
 	fill.BackgroundColor3 = WorldConfig.Beacon.ActiveColor
 	fill.BorderSizePixel = 0
 	fill.Parent = bg
-	
+
 	local fillCorner = Instance.new("UICorner")
 	fillCorner.CornerRadius = UDim.new(0, 4)
 	fillCorner.Parent = fill
-	
+
 	-- Label
 	local label = Instance.new("TextLabel")
 	label.Name = "PercentLabel"
@@ -80,7 +87,7 @@ local function createBeaconUI(instance: Instance)
 	label.Font = Enum.Font.GothamBold
 	label.TextStrokeTransparency = 0.5
 	label.Parent = bg
-	
+
 	beaconUIs[instance] = {
 		Billboard = billboard,
 		FillBar = fill,
@@ -93,19 +100,21 @@ end
 ]]
 local function onProgressUpdated(instance: Instance, progress: number)
 	local ui = beaconUIs[instance]
-	if not ui then 
+	if not ui then
 		createBeaconUI(instance)
 		ui = beaconUIs[instance]
 	end
-	if not ui then return end
-	
+	if not ui then
+		return
+	end
+
 	-- Tween the fill bar
 	TweenService:Create(ui.FillBar, TweenInfo.new(0.3), {
-		Size = UDim2.fromScale(progress / 100, 1)
+		Size = UDim2.fromScale(progress / 100, 1),
 	}):Play()
-	
+
 	ui.Label.Text = string.format("CHARGING: %d%%", math.floor(progress))
-	
+
 	-- Update color based on charging state
 	if progress > 0 and progress < 100 then
 		ui.FillBar.BackgroundColor3 = WorldConfig.Beacon.ChargingColor
@@ -117,17 +126,19 @@ end
 ]]
 local function onStateChanged(instance: Instance, newState: string)
 	local ui = beaconUIs[instance]
-	if not ui then return end
-	
+	if not ui then
+		return
+	end
+
 	if newState == "Completed" then
 		ui.Label.Text = "BEACON DEFENDED"
 		ui.FillBar.BackgroundColor3 = WorldConfig.Beacon.CompletedColor
-		
+
 		-- Brief completion pop effect
 		TweenService:Create(ui.Billboard, TweenInfo.new(0.5, Enum.EasingStyle.Back), {
-			Size = UDim2.fromScale(BAR_WIDTH * 1.2, BAR_HEIGHT * 1.2)
+			Size = UDim2.fromScale(BAR_WIDTH * 1.2, BAR_HEIGHT * 1.2),
 		}):Play()
-		
+
 		task.delay(5, function()
 			if ui.Billboard then
 				ui.Billboard.Enabled = false
@@ -149,12 +160,12 @@ function BeaconController:Start()
 	if progressRemote then
 		progressRemote.OnClientEvent:Connect(onProgressUpdated)
 	end
-	
+
 	local stateRemote = Remotes:GetEvent("BeaconStateChanged")
 	if stateRemote then
 		stateRemote.OnClientEvent:Connect(onStateChanged)
 	end
-	
+
 	print("[BeaconController] Started")
 end
 

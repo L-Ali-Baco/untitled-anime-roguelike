@@ -20,7 +20,7 @@ function CharacterLib:GetRootPart(model: Model): BasePart?
 	if not model then
 		return nil
 	end
-	
+
 	-- Try common root part names
 	for _, name in ROOT_PART_NAMES do
 		local part = model:FindFirstChild(name)
@@ -28,12 +28,12 @@ function CharacterLib:GetRootPart(model: Model): BasePart?
 			return part
 		end
 	end
-	
+
 	-- Fallback: try PrimaryPart
 	if model.PrimaryPart then
 		return model.PrimaryPart
 	end
-	
+
 	-- Last resort: find any anchored or main part
 	return model:FindFirstChildOfClass("BasePart")
 end

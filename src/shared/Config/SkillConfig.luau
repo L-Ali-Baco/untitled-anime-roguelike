@@ -86,4 +86,45 @@ return {
 			FireRateBuff = 1.5,
 		},
 	},
+
+	-- ==========================================
+	-- BIKER KING (Fire Brawler)
+	-- ==========================================
+	BikerKing = {
+		-- M2: Buff / Ramp Up
+		Secondary = {
+			Name = "Inferno Ramp",
+			Description = "BUFF: Ramp up fire rate and ignite enemies on hit for 5 seconds.",
+			Icon = "rbxassetid://6034287594", -- Placeholder: Lightning
+			Cooldown = 10,
+			Duration = 5,
+			FireRateBuff = 1.5, -- 50% faster attacks
+			BurnDamage = 0.3, -- 30% base damage per burn tick
+			BurnDuration = 3, -- Burn lasts 3s
+			BurnTickRate = 0.5, -- Tick every 0.5s
+		},
+		-- E: AOE Zone
+		Skill1 = {
+			Name = "Flame Circle",
+			Description = "ZONE: Erupts a ring of fire around you, burning all nearby enemies.",
+			Icon = "rbxassetid://6034509993", -- Placeholder: Impact
+			Cooldown = 12,
+			Damage = 1.5, -- 150% per tick
+			Radius = 18,
+			Duration = 3,
+			TickRate = 0.5,
+		},
+		-- R: Mobility / Chain Stomp
+		Skill2 = {
+			Name = "Meteor Stomp",
+			Description = "LEAP: Launch into the sky and slam down. Landing on enemies bounces you back up.",
+			Icon = "rbxassetid://6031071053", -- Placeholder: Sword
+			Cooldown = 14,
+			Damage = 2.0, -- 200% per stomp
+			Radius = 12,
+			LaunchForce = 80,
+			BounceForce = 60,
+			MaxBounces = 5,
+		},
+	},
 }

@@ -144,14 +144,14 @@ local function cleanupAnimations()
 		currentIdleTrack:Destroy()
 		currentIdleTrack = nil
 	end
-	
+
 	-- Stop current run track
 	if currentRunTrack then
 		currentRunTrack:Stop(0.2)
 		currentRunTrack:Destroy()
 		currentRunTrack = nil
 	end
-	
+
 	-- Disconnect animation connections
 	for _, connection in animationConnections do
 		connection:Disconnect()
@@ -165,56 +165,56 @@ end
 local function setupCustomCharacterAnimations(character: Model)
 	-- Clean up any existing animations
 	cleanupAnimations()
-	
+
 	-- Check if this is a custom rig
 	if not character:GetAttribute("IsCustomRig") then
 		return
 	end
-	
+
 	print("[ClassController] Setting up animations for custom rig")
-	
+
 	-- Get animation IDs from config or attributes
 	local idleAnimationId = character:GetAttribute("IdleAnimationId")
 	if not idleAnimationId and classData and classData.IdleAnimationId then
 		idleAnimationId = classData.IdleAnimationId
 	end
-	
+
 	local runAnimationId = character:GetAttribute("RunAnimationId")
 	if not runAnimationId and classData and classData.RunAnimationId then
 		runAnimationId = classData.RunAnimationId
 	end
-	
+
 	-- Wait for humanoid
 	local humanoid = character:WaitForChild("Humanoid", 5)
 	if not humanoid then
 		warn("[ClassController] No Humanoid found in custom rig")
 		return
 	end
-    
-    local rootPart = character:WaitForChild("HumanoidRootPart", 5)
-	
+
+	local rootPart = character:WaitForChild("HumanoidRootPart", 5)
+
 	-- Get or create Animator
 	local animator = humanoid:FindFirstChildOfClass("Animator")
 	if not animator then
 		animator = Instance.new("Animator")
 		animator.Parent = humanoid
 	end
-	
+
 	-- DEBUG: Print rig type info
-    print("[ClassController] Humanoid RigType:", humanoid.RigType)
-    if humanoid.RigType == Enum.HumanoidRigType.R6 then
-        warn("[ClassController] WARNING: Custom character is detected as R6! R15 animations will NOT work.")
-    end
-	
+	print("[ClassController] Humanoid RigType:", humanoid.RigType)
+	if humanoid.RigType == Enum.HumanoidRigType.R6 then
+		warn("[ClassController] WARNING: Custom character is detected as R6! R15 animations will NOT work.")
+	end
+
 	-- Load Idle Animation
 	if idleAnimationId then
 		local idleAnimation = Instance.new("Animation")
 		idleAnimation.AnimationId = idleAnimationId
-		
+
 		local success, track = pcall(function()
 			return animator:LoadAnimation(idleAnimation)
 		end)
-		
+
 		if success and track then
 			track.Priority = Enum.AnimationPriority.Idle
 			track.Looped = true
@@ -222,16 +222,16 @@ local function setupCustomCharacterAnimations(character: Model)
 		end
 		idleAnimation:Destroy()
 	end
-	
+
 	-- Load Run Animation
 	if runAnimationId then
 		local runAnimation = Instance.new("Animation")
 		runAnimation.AnimationId = runAnimationId
-		
+
 		local success, track = pcall(function()
 			return animator:LoadAnimation(runAnimation)
 		end)
-		
+
 		if success and track then
 			track.Priority = Enum.AnimationPriority.Movement
 			track.Looped = true
@@ -239,42 +239,44 @@ local function setupCustomCharacterAnimations(character: Model)
 		end
 		runAnimation:Destroy()
 	end
-	
+
 	-- Handle animation state switching
 	local function updateAnimations()
-		if not rootPart then return end
-        
-        -- Calculate horizontal speed (ignore vertical)
+		if not rootPart then
+			return
+		end
+
+		-- Calculate horizontal speed (ignore vertical)
 		local velocity = rootPart.AssemblyLinearVelocity
-        local speed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
-        
-        -- Threshold for "moving"
-        local isMoving = speed > 0.5
-        
-        if isMoving then
-            -- Play Run, Stop Idle
-            if currentRunTrack and not currentRunTrack.IsPlaying then
-                currentRunTrack:Play(0.2)
-            end
-            if currentIdleTrack and currentIdleTrack.IsPlaying then
-                currentIdleTrack:Stop(0.2)
-            end
-        else
-            -- Play Idle, Stop Run
-            if currentIdleTrack and not currentIdleTrack.IsPlaying then
-                currentIdleTrack:Play(0.2)
-            end
-            if currentRunTrack and currentRunTrack.IsPlaying then
-                currentRunTrack:Stop(0.2)
-            end
-        end
+		local speed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+
+		-- Threshold for "moving"
+		local isMoving = speed > 0.5
+
+		if isMoving then
+			-- Play Run, Stop Idle
+			if currentRunTrack and not currentRunTrack.IsPlaying then
+				currentRunTrack:Play(0.2)
+			end
+			if currentIdleTrack and currentIdleTrack.IsPlaying then
+				currentIdleTrack:Stop(0.2)
+			end
+		else
+			-- Play Idle, Stop Run
+			if currentIdleTrack and not currentIdleTrack.IsPlaying then
+				currentIdleTrack:Play(0.2)
+			end
+			if currentRunTrack and currentRunTrack.IsPlaying then
+				currentRunTrack:Stop(0.2)
+			end
+		end
 	end
-	
+
 	-- Connect update loop
 	local runServiceConnection = game:GetService("RunService").Heartbeat:Connect(updateAnimations)
 	table.insert(animationConnections, runServiceConnection)
-    
-    -- Handle death
+
+	-- Handle death
 	local stateConnection = humanoid.StateChanged:Connect(function(_, newState)
 		if newState == Enum.HumanoidStateType.Dead then
 			cleanupAnimations()
@@ -348,23 +350,23 @@ function ClassController:Start()
 	local function onCharacterAdded(character)
 		-- Wait a moment for attributes to be set by server
 		task.wait(0.2)
-		
+
 		-- Check if this is a custom rig and set up animations
 		if character:GetAttribute("IsCustomRig") then
 			setupCustomCharacterAnimations(character)
 		end
 	end
-	
+
 	-- Connect to current character if exists
 	if LocalPlayer.Character then
 		task.spawn(function()
 			onCharacterAdded(LocalPlayer.Character)
 		end)
 	end
-	
+
 	-- Connect to future characters
 	LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
-	
+
 	-- Clean up animations when character is removed
 	LocalPlayer.CharacterRemoving:Connect(function()
 		cleanupAnimations()

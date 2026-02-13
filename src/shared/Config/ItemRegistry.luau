@@ -46,8 +46,8 @@ local ItemRegistry = {
 			Rarity = "Common",
 			Icon = "rbxassetid://6031097903", -- Placeholder: Lightning
 			Procs = {
-				{ Type = "OnHit", Id = "ChainLightning", Chance = 0.15, Damage = 0.4, Radius = 20 }
-			}
+				{ Type = "OnHit", Id = "ChainLightning", Chance = 0.15, Damage = 0.4, Radius = 20 },
+			},
 		},
 		EchoBlade = {
 			Name = "Echo Blade",
@@ -55,7 +55,7 @@ local ItemRegistry = {
 			Rarity = "Rare",
 			Icon = "rbxassetid://6031097903", -- Placeholder: Sword
 			-- Logic handled by CombatService counting attacks
-			Tags = {"PassiveAttackCount"}, 
+			Tags = { "PassiveAttackCount" },
 		},
 		VolatileCasing = {
 			Name = "Volatile Casing",
@@ -63,8 +63,8 @@ local ItemRegistry = {
 			Rarity = "Common",
 			Icon = "rbxassetid://6031097903", -- Placeholder: Bomb
 			Procs = {
-				{ Type = "OnKill", Id = "Explosion", Chance = 1.0, Damage = 1.5, Radius = 15 }
-			}
+				{ Type = "OnKill", Id = "Explosion", Chance = 1.0, Damage = 1.5, Radius = 15 },
+			},
 		},
 		VoidMagnet = {
 			Name = "Void Magnet",
@@ -72,8 +72,8 @@ local ItemRegistry = {
 			Rarity = "Rare",
 			Icon = "rbxassetid://6031097903", -- Placeholder: Magnet
 			Procs = {
-				{ Type = "OnCrit", Id = "Vacuum", Chance = 1.0, Radius = 25 }
-			}
+				{ Type = "OnCrit", Id = "Vacuum", Chance = 1.0, Radius = 25 },
+			},
 		},
 
 		-- ==========================================
@@ -85,8 +85,8 @@ local ItemRegistry = {
 			Rarity = "Rare",
 			Icon = "rbxassetid://6034287594",
 			Procs = {
-				{ Type = "OnDash", Id = "Decoy", Chance = 1.0, Damage = 2.0, Duration = 1.5 }
-			}
+				{ Type = "OnDash", Id = "Decoy", Chance = 1.0, Damage = 2.0, Duration = 1.5 },
+			},
 		},
 		JetstreamSandals = {
 			Name = "Jetstream Sandals",
@@ -94,8 +94,8 @@ local ItemRegistry = {
 			Rarity = "Epic",
 			Icon = "rbxassetid://6034509993",
 			Procs = {
-				{ Type = "OnJump", Id = "GroundSlam", Chance = 1.0, Damage = 1.0, Radius = 20 }
-			}
+				{ Type = "OnJump", Id = "GroundSlam", Chance = 1.0, Damage = 1.0, Radius = 20 },
+			},
 		},
 		MomentumBattery = {
 			Name = "Momentum Battery",
@@ -103,7 +103,7 @@ local ItemRegistry = {
 			Rarity = "Common",
 			Icon = "rbxassetid://6031289529",
 			-- Logic handled by CombatService adding buffs
-			Tags = {"OnHitBuff"}, 
+			Tags = { "OnHitBuff" },
 		},
 
 		-- ==========================================
@@ -114,25 +114,25 @@ local ItemRegistry = {
 			Description = "Deal +200% Damage, but -90% Max Health.",
 			Rarity = "Legendary",
 			Icon = "rbxassetid://6031071053",
-			Tags = {"Cursed"},
+			Tags = { "Cursed" },
 			Effects = {
 				{ Stat = "Damage", Value = 2.0, Type = "Multiplier" }, -- +200% (3x total)
 				{ Stat = "MaxHealth", Value = -0.9, Type = "Multiplier" }, -- -90% (0.1x total)
-			}
+			},
 		},
 		HiveMind = {
 			Name = "The Hive-Mind",
 			Description = "Damage is delayed but dealt in a massive burst after 3s.",
 			Rarity = "Legendary",
 			Icon = "rbxassetid://6031097903",
-			Tags = {"ReplaceDamageLogic"},
+			Tags = { "ReplaceDamageLogic" },
 		},
 		AuraOfTheTyrant = {
 			Name = "Aura of the Tyrant",
 			Description = "Replaces attacks with a giant autonomous spectral sword.",
 			Rarity = "Legendary",
 			Icon = "rbxassetid://6031097903",
-			Tags = {"ReplaceM1"},
+			Tags = { "ReplaceM1" },
 		},
 
 		-- ==========================================

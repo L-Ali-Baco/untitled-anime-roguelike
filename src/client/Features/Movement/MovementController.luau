@@ -70,7 +70,7 @@ local function getLinearVelocity(rootPart: BasePart): LinearVelocity?
 	if linearVelocityConstraint and linearVelocityConstraint.Parent then
 		return linearVelocityConstraint
 	end
-	
+
 	linearVelocityConstraint = rootPart:FindFirstChild("MovementVelocity") :: LinearVelocity?
 	return linearVelocityConstraint
 end
@@ -82,7 +82,7 @@ local function getAlignOrientation(rootPart: BasePart): AlignOrientation?
 	if alignOrientationConstraint and alignOrientationConstraint.Parent then
 		return alignOrientationConstraint
 	end
-	
+
 	alignOrientationConstraint = rootPart:FindFirstChild("RotationControl") :: AlignOrientation?
 	return alignOrientationConstraint
 end
@@ -120,7 +120,7 @@ end
 ]]
 local function checkGrounded(rootPart: BasePart, humanoid: Humanoid?): boolean
 	local rayOrigin = rootPart.Position
-	
+
 	-- Calculate ray length dynamically
 	local dist = 4 -- Fallback
 	if humanoid then
@@ -128,13 +128,13 @@ local function checkGrounded(rootPart: BasePart, humanoid: Humanoid?): boolean
 		-- Add slight margin (RaycastDistance) to ensure detection
 		dist = (rootPart.Size.Y * 0.5) + humanoid.HipHeight + MovementConfig.Ground.RaycastDistance
 	end
-	
+
 	local rayDirection = Vector3.new(0, -dist, 0)
-	
+
 	local raycastParams = RaycastParams.new()
-	raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+	raycastParams.FilterDescendantsInstances = { LocalPlayer.Character }
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	
+
 	local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
 	return result ~= nil
 end
@@ -145,7 +145,7 @@ end
 local function updateState(rootPart: BasePart, humanoid: Humanoid?, isMoving: boolean)
 	-- Check if grounded using raycast (works for all rig types)
 	isGrounded = checkGrounded(rootPart, humanoid)
-	
+
 	if isGrounded then
 		lastGroundedTime = os.clock()
 	end
@@ -179,34 +179,42 @@ local function rotateCharacter(rootPart: BasePart, direction: Vector3, deltaTime
 		return
 	end
 	flatDirection = flatDirection.Unit
-	
+
 	-- Get target angle from movement direction
 	local targetAngle = math.atan2(flatDirection.X, flatDirection.Z)
-	
+
 	-- Apply facing offset for custom rigs (corrects model's forward direction)
 	if isCustomRig then
 		targetAngle = targetAngle + facingOffsetRadians
 	end
-	
+
 	-- Calculate shortest rotation from current angle
 	local angleDiff = targetAngle - currentYAngle
-	
+
 	-- Normalize to -pi to pi
-	while angleDiff > math.pi do angleDiff = angleDiff - 2 * math.pi end
-	while angleDiff < -math.pi do angleDiff = angleDiff + 2 * math.pi end
-	
+	while angleDiff > math.pi do
+		angleDiff = angleDiff - 2 * math.pi
+	end
+	while angleDiff < -math.pi do
+		angleDiff = angleDiff + 2 * math.pi
+	end
+
 	-- Smooth rotation
 	local turnSpeed = MovementConfig.TurnSpeed
 	local maxTurn = turnSpeed * deltaTime
 	local actualTurn = math.clamp(angleDiff, -maxTurn, maxTurn)
-	
+
 	-- Update current angle
 	currentYAngle = currentYAngle + actualTurn
-	
+
 	-- Normalize currentYAngle to stay within reasonable bounds
-	while currentYAngle > math.pi do currentYAngle = currentYAngle - 2 * math.pi end
-	while currentYAngle < -math.pi do currentYAngle = currentYAngle + 2 * math.pi end
-	
+	while currentYAngle > math.pi do
+		currentYAngle = currentYAngle - 2 * math.pi
+	end
+	while currentYAngle < -math.pi do
+		currentYAngle = currentYAngle + 2 * math.pi
+	end
+
 	if isCustomRig then
 		-- Custom rig: Update AlignOrientation constraint (physics handles the actual rotation)
 		local alignOrientation = getAlignOrientation(rootPart)
@@ -229,10 +237,10 @@ end
 ]]
 local function applyCustomMovement(rootPart: BasePart, direction: Vector3, deltaTime: number)
 	local baseSpeed = MovementConfig.WalkSpeed
-	
+
 	-- Apply Item Modifiers
 	local targetSpeed = StatLib:GetStat(LocalPlayer, "WalkSpeed", baseSpeed)
-	
+
 	-- Scale acceleration with speed
 	local speedScale = math.max(1, targetSpeed / baseSpeed)
 	local acceleration = MovementConfig.Acceleration * speedScale
@@ -277,13 +285,13 @@ end
 ]]
 local function applyStandardMovement(humanoid: Humanoid, rootPart: BasePart, direction: Vector3, deltaTime: number)
 	local baseSpeed = MovementConfig.WalkSpeed
-	
+
 	-- Apply Item Modifiers
 	local targetSpeed = StatLib:GetStat(LocalPlayer, "WalkSpeed", baseSpeed)
-	
+
 	-- Scale acceleration with speed to prevent sluggishness at high speeds
 	local speedScale = math.max(1, targetSpeed / baseSpeed)
-	
+
 	local acceleration = MovementConfig.Acceleration * speedScale
 	local deceleration = MovementConfig.Deceleration * speedScale
 
@@ -408,9 +416,9 @@ end
 ]]
 function MovementController:StopMovement()
 	currentVelocity = Vector3.zero
-	
+
 	local _, humanoid, rootPart = getCharacterParts()
-	
+
 	if isCustomRig and rootPart then
 		local lv = getLinearVelocity(rootPart)
 		if lv then
@@ -461,20 +469,20 @@ function MovementController:Start()
 		alignOrientationConstraint = nil
 		facingOffsetRadians = 0
 		currentYAngle = 0
-		
+
 		-- Wait for character to load
 		task.wait(0.1)
-		
+
 		-- Check if this is a custom rig
 		isCustomRig = checkIsCustomRig()
 		print("[MovementController] Character loaded, isCustomRig:", isCustomRig)
-		
+
 		-- Get facing offset for custom rigs (converts degrees to radians)
 		if isCustomRig then
 			local offsetDegrees = character:GetAttribute("FacingOffset") or 0
 			facingOffsetRadians = math.rad(offsetDegrees)
 			print("[MovementController] Facing offset:", offsetDegrees, "degrees")
-			
+
 			-- Initialize currentYAngle from the character's current rotation
 			local rootPart = CharacterLib:GetRootPart(character)
 			if rootPart then
@@ -482,7 +490,7 @@ function MovementController:Start()
 				currentYAngle = math.atan2(look.X, look.Z)
 			end
 		end
-		
+
 		if not isCustomRig then
 			-- Standard rig: set base walk speed
 			local humanoid = character:WaitForChild("Humanoid", 5)
@@ -491,12 +499,12 @@ function MovementController:Start()
 			end
 		end
 	end
-	
+
 	-- Handle existing character
 	if LocalPlayer.Character then
 		task.spawn(onCharacterAdded, LocalPlayer.Character)
 	end
-	
+
 	-- Handle future characters
 	table.insert(connections, LocalPlayer.CharacterAdded:Connect(onCharacterAdded))
 

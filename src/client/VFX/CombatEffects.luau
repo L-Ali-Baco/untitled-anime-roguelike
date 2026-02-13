@@ -196,6 +196,86 @@ function CombatEffects:SpawnImpactRing(position: Vector3, comboHit: number?)
 end
 
 --[[
+    Create fire-themed hit spark for Biker King attacks.
+    Uses FireM1 particle from ReplicatedStorage if available.
+]]
+function CombatEffects:SpawnFireHitEffect(position: Vector3, comboHit: number?)
+	comboHit = comboHit or 1
+
+	local attachment = Instance.new("Attachment")
+	attachment.WorldPosition = position
+	attachment.Parent = workspace.Terrain
+
+	-- Try to use nozzle attachment (contains FireM1 particle) from ReplicatedStorage
+	local nozzle = ReplicatedStorage:FindFirstChild("nozzle", true)
+	local emitted = false
+	if nozzle and nozzle:IsA("Attachment") then
+		for _, child in nozzle:GetChildren() do
+			if child:IsA("ParticleEmitter") then
+				local cloned = child:Clone()
+				cloned.Rate = 0
+				cloned.Parent = attachment
+				cloned:Emit(8 + comboHit * 4)
+				emitted = true
+			end
+		end
+	end
+	if not emitted then
+		-- Fallback: programmatic fire sparks
+		local sparks = Instance.new("ParticleEmitter")
+		sparks.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 200, 50)),
+			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 100, 0)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 30, 0)),
+		})
+		sparks.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.6),
+			NumberSequenceKeypoint.new(0.3, 0.4),
+			NumberSequenceKeypoint.new(1, 0),
+		})
+		sparks.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0),
+			NumberSequenceKeypoint.new(0.5, 0.3),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		sparks.LightEmission = 1
+		sparks.LightInfluence = 0
+		sparks.Lifetime = NumberRange.new(0.15, 0.3)
+		sparks.Speed = NumberRange.new(8, 18)
+		sparks.SpreadAngle = Vector2.new(50, 50)
+		sparks.Drag = 4
+		sparks.Rate = 0
+		sparks.Parent = attachment
+		sparks:Emit(8 + comboHit * 4)
+	end
+
+	-- Fire flash
+	local flash = Instance.new("Part")
+	flash.Name = "FireFlash"
+	flash.Anchored = true
+	flash.CanCollide = false
+	flash.CanQuery = false
+	flash.CanTouch = false
+	flash.CastShadow = false
+	flash.Material = Enum.Material.Neon
+	flash.Color = Color3.fromRGB(255, 120, 0)
+	flash.Transparency = 0.3
+	flash.Shape = Enum.PartType.Ball
+	flash.Size = Vector3.new(1.5, 1.5, 1.5) * (1 + comboHit * 0.3)
+	flash.Position = position
+	flash.Parent = workspace
+
+	TweenService:Create(
+		flash,
+		TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Size = Vector3.new(3, 3, 3) * (1 + comboHit * 0.3), Transparency = 1 }
+	):Play()
+
+	Debris:AddItem(attachment, 0.4)
+	Debris:AddItem(flash, 0.15)
+end
+
+--[[
     Spawn all hit effects at once
 ]]
 function CombatEffects:SpawnHitEffects(position: Vector3, normal: Vector3?, comboHit: number)

@@ -32,11 +32,11 @@ function MapService:ClearMap()
 		currentMapModel:Destroy()
 		currentMapModel = nil
 	end
-	
+
 	enemySpawns = {}
 	chestSpawns = {}
 	playerSpawns = {}
-	
+
 	print("[MapService] Map cleared")
 end
 
@@ -46,7 +46,7 @@ end
 function MapService:LoadMap(mapName: string)
 	-- Clear existing
 	self:ClearMap()
-	
+
 	-- Find map model
 	local mapsFolder = ReplicatedStorage:FindFirstChild(MapConfig.StorageFolder)
 	if not mapsFolder then
@@ -56,15 +56,15 @@ function MapService:LoadMap(mapName: string)
 		mapsFolder.Parent = ReplicatedStorage
 		warn("[MapService] Created missing Maps folder in ReplicatedStorage")
 	end
-	
+
 	local mapTemplate = mapsFolder:FindFirstChild(mapName)
 	if not mapTemplate then
 		warn("[MapService] Map not found:", mapName, "- Using placeholder baseplate")
-		
+
 		-- Create a dummy map if not found
 		local dummyMap = Instance.new("Model")
 		dummyMap.Name = "PlaceholderMap"
-		
+
 		local floor = Instance.new("Part")
 		floor.Name = "Floor"
 		floor.Size = Vector3.new(200, 1, 200)
@@ -72,7 +72,7 @@ function MapService:LoadMap(mapName: string)
 		floor.Anchored = true
 		floor.Color = Color3.fromRGB(50, 50, 50)
 		floor.Parent = dummyMap
-		
+
 		-- Add some spawn points
 		for i = 1, 4 do
 			local spawn = Instance.new("Part")
@@ -86,7 +86,7 @@ function MapService:LoadMap(mapName: string)
 			CollectionService:AddTag(spawn, MapConfig.Tags.SpawnPoint)
 			spawn.Parent = dummyMap
 		end
-		
+
 		local pSpawn = Instance.new("Part")
 		pSpawn.Name = "PlayerSpawn"
 		pSpawn.Position = Vector3.new(0, 5, 0)
@@ -94,7 +94,7 @@ function MapService:LoadMap(mapName: string)
 		pSpawn.Transparency = 1
 		CollectionService:AddTag(pSpawn, MapConfig.Tags.PlayerSpawn)
 		pSpawn.Parent = dummyMap
-		
+
 		currentMapModel = dummyMap
 		currentMapModel.Parent = Workspace
 	else
@@ -102,7 +102,7 @@ function MapService:LoadMap(mapName: string)
 		currentMapModel = mapTemplate:Clone()
 		currentMapModel.Parent = Workspace
 	end
-	
+
 	-- Cache points using CollectionService and Tags
 	-- This assumes map creator tagged them correctly, OR named them correctly
 	-- We support both Tag and Name for robustness
@@ -113,23 +113,26 @@ function MapService:LoadMap(mapName: string)
 				table.insert(enemySpawns, desc)
 				desc.Transparency = 1 -- Hide spawners
 			end
-			
+
 			-- Chest Spawns
 			if CollectionService:HasTag(desc, MapConfig.Tags.ChestSpawn) or desc.Name == MapConfig.Tags.ChestSpawn then
 				table.insert(chestSpawns, desc)
 				desc.Transparency = 1
 			end
-			
+
 			-- Player Spawns
-			if CollectionService:HasTag(desc, MapConfig.Tags.PlayerSpawn) or desc.Name == MapConfig.Tags.PlayerSpawn then
+			if
+				CollectionService:HasTag(desc, MapConfig.Tags.PlayerSpawn)
+				or desc.Name == MapConfig.Tags.PlayerSpawn
+			then
 				table.insert(playerSpawns, desc)
 				desc.Transparency = 1
 			end
 		end
 	end
-	
+
 	print("[MapService] Loaded", mapName, "- Enemy Spawns:", #enemySpawns)
-	
+
 	return currentMapModel
 end
 
@@ -141,7 +144,7 @@ function MapService:GetRandomEnemySpawn(): Vector3
 		local part = enemySpawns[math.random(#enemySpawns)]
 		return part.Position + Vector3.new(0, 2, 0)
 	end
-	
+
 	-- Fallback: Random point around center
 	local angle = math.random() * math.pi * 2
 	local dist = math.random(30, 60)

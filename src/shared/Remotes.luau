@@ -19,7 +19,7 @@ local REMOTE_EVENTS = {
 	-- Combat (Ranged)
 	"RequestRangedHit", -- Client -> Server: Request ranged damage (hitscan)
 	"RangedHitConfirmed", -- Server -> Client: Confirm ranged hit for VFX
-	
+
 	-- Skill System
 	"RequestSkill", -- Client -> Server: Request to use a skill (Slot: "Secondary", "Skill1", "Skill2")
 	"SkillUsed", -- Server -> Clients: Skill successfully used (for VFX/Cooldowns)
@@ -37,7 +37,7 @@ local REMOTE_EVENTS = {
 	-- World Objectives
 	"BeaconStateChanged", -- Server -> All Clients: Beacon changed state (Active, Charging, Completed)
 	"BeaconProgressUpdated", -- Server -> All Clients: Current charge percentage
-	
+
 	-- Loot System
 	"GrantItem", -- Server -> Client: Notifies player of item gained
 	"RequestOpenChest", -- Client -> Server: Request to open a loot chest
@@ -50,7 +50,7 @@ local REMOTE_EVENTS = {
 
 	-- Debug
 	"DebugMessage", -- Server -> Client: Send debug message to display
-	
+
 	-- Director System ("The Storm")
 	"DirectorDifficultyUpdate", -- Server -> Client: Difficulty sync
 	"DirectorEventTriggered", -- Server -> Client: Event notification

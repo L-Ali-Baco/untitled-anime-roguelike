@@ -6,7 +6,7 @@
 return {
 	-- Folder in ReplicatedStorage where map models are stored
 	StorageFolder = "Maps",
-	
+
 	-- Available Maps
 	Maps = {
 		TestArena = {
@@ -20,14 +20,14 @@ return {
 			Description = "Floating islands consumed by the storm.",
 			Rarity = 1,
 			MinDifficulty = 0,
-		}
+		},
 	},
-	
+
 	-- Tags used to identify special parts in the map
 	Tags = {
 		SpawnPoint = "EnemySpawn", -- Where enemies can spawn
 		PlayerSpawn = "PlayerSpawn", -- Where players start
 		ChestSpawn = "ChestLocation", -- Where chests MIGHT spawn
 		Teleporter = "Teleporter", -- The exit
-	}
+	},
 }

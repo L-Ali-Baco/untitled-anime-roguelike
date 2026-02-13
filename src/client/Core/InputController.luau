@@ -101,7 +101,7 @@ local function onInputBegan(input: InputObject, gameProcessed: boolean)
 		InputController.OnAttackPressed:Fire()
 		return
 	end
-	
+
 	-- Mouse secondary (M2)
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
 		print("M2 Pressed")

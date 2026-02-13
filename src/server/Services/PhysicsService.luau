@@ -52,10 +52,10 @@ function PhysicsManager:Init()
 	-- Configure Rules:
 	-- 1. DashingPlayers ignore Enemies
 	PhysicsService:CollisionGroupSetCollidable(GROUPS.DashingPlayers, GROUPS.Enemies, false)
-	
+
 	-- 2. DashingPlayers still collide with default (environment)
 	PhysicsService:CollisionGroupSetCollidable(GROUPS.DashingPlayers, "Default", true)
-	
+
 	-- 3. Players and Enemies collide normally
 	PhysicsService:CollisionGroupSetCollidable(GROUPS.Players, GROUPS.Enemies, true)
 
@@ -71,7 +71,9 @@ function PhysicsManager:Start()
 	if iframeRemote then
 		iframeRemote.OnServerEvent:Connect(function(player: Player, isDashing: boolean)
 			local character = player.Character
-			if not character then return end
+			if not character then
+				return
+			end
 
 			if isDashing then
 				self:SetModelCollisionGroup(character, GROUPS.DashingPlayers)

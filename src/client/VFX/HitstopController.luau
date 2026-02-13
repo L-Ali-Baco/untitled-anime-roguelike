@@ -36,12 +36,12 @@ local function isEnemyModel(model: Model): boolean
 	if not model then
 		return false
 	end
-	
+
 	-- Check for Enemy tag
 	if CollectionService:HasTag(model, "Enemy") then
 		return true
 	end
-	
+
 	-- Check for common enemy names
 	local enemyNames = { "Minion", "Brute", "Shooter" }
 	for _, name in enemyNames do
@@ -49,7 +49,7 @@ local function isEnemyModel(model: Model): boolean
 			return true
 		end
 	end
-	
+
 	-- Check if it's NOT the local player's character (anything else might be enemy)
 	if model ~= LocalPlayer.Character then
 		local humanoid = model:FindFirstChildOfClass("Humanoid")
@@ -61,7 +61,7 @@ local function isEnemyModel(model: Model): boolean
 			end
 		end
 	end
-	
+
 	return false
 end
 
@@ -96,7 +96,7 @@ local function unfreezePart(part: BasePart)
 	end
 
 	part.Anchored = data.Anchored
-	
+
 	-- Restore velocities for player character
 	if not data.Anchored then
 		part.AssemblyLinearVelocity = data.Velocity
@@ -114,7 +114,7 @@ local function freezeCharacter(character: Model)
 	if not character then
 		return
 	end
-	
+
 	-- CRITICAL: Skip enemies - their physics are server-controlled
 	-- Freezing them client-side causes desync and teleportation
 	if isEnemyModel(character) then

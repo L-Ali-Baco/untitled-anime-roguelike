@@ -49,7 +49,7 @@ local function onHeartbeat(deltaTime: number)
 	isRegenerating = true
 	local baseRegen = StaminaConfig.RegenRate
 	local regenRate = StatLib:GetStat(game.Players.LocalPlayer, "StaminaRegen", baseRegen)
-	
+
 	local regenAmount = regenRate * deltaTime
 	local newStamina = math.min(currentStamina + regenAmount, StaminaConfig.Max)
 

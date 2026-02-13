@@ -119,11 +119,11 @@ local function onEnemyDied(data)
 	if not enemyModel or not enemyModel.Parent then
 		return
 	end
-	
+
 	local rootPart = enemyModel:FindFirstChild("HumanoidRootPart")
 		or enemyModel:FindFirstChild("Torso")
 		or enemyModel.PrimaryPart
-	
+
 	local deathPosition = rootPart and rootPart.Position or position
 
 	-- IMMEDIATELY disable all physics interactions
@@ -136,12 +136,12 @@ local function onEnemyDied(data)
 			part.Anchored = true -- Freeze in place (no ragdoll)
 		end
 	end
-	
+
 	-- === DEATH VFX: Smoke Burst ===
 	local smokeAttachment = Instance.new("Attachment")
 	smokeAttachment.WorldPosition = deathPosition
 	smokeAttachment.Parent = workspace.Terrain
-	
+
 	-- Smoke particles
 	local smokeParticles = Instance.new("ParticleEmitter")
 	smokeParticles.Color = ColorSequence.new({
@@ -163,24 +163,24 @@ local function onEnemyDied(data)
 	smokeParticles.SpreadAngle = Vector2.new(180, 180)
 	smokeParticles.Rate = 0
 	smokeParticles.Parent = smokeAttachment
-	
+
 	-- Emit smoke burst
 	smokeParticles:Emit(20)
-	
+
 	-- Cleanup smoke after particles finish
 	Debris:AddItem(smokeAttachment, 1)
-	
+
 	-- === DEATH VFX: Rapid Dissolve ===
 	-- Quick fade (0.3s) so enemy disappears fast
 	local dissolveDuration = 0.3
-	
+
 	for _, part in enemyModel:GetDescendants() do
 		if part:IsA("BasePart") then
 			-- Shrink and fade simultaneously
 			local dissolveTween = TweenService:Create(
 				part,
 				TweenInfo.new(dissolveDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-				{ 
+				{
 					Transparency = 1,
 					Size = part.Size * 0.1, -- Shrink to 10%
 				}
@@ -195,7 +195,7 @@ local function onEnemyDied(data)
 			fadeTween:Play()
 		end
 	end
-	
+
 	-- NOTE: We do NOT destroy the model here!
 	-- The server owns the model and will destroy it via EnemyService.
 	-- Client only handles visual effects (fade/shrink).
@@ -314,8 +314,10 @@ end
     - Impact particles burst
 ]]
 function EnemyVFXController:PlayHitstun(enemyModel: Model)
-	if not enemyModel or not enemyModel.Parent then return end
-	
+	if not enemyModel or not enemyModel.Parent then
+		return
+	end
+
 	-- Cooldown check to prevent double-application from prediction + server broadcast
 	local now = os.clock()
 	local lastHitstun = hitstunCooldowns[enemyModel]
@@ -323,12 +325,14 @@ function EnemyVFXController:PlayHitstun(enemyModel: Model)
 		return -- Already playing hitstun effect, skip
 	end
 	hitstunCooldowns[enemyModel] = now
-	
+
 	local rootPart = enemyModel:FindFirstChild("HumanoidRootPart")
 		or enemyModel:FindFirstChild("Torso")
 		or enemyModel.PrimaryPart
 
-	if not rootPart then return end
+	if not rootPart then
+		return
+	end
 
 	-- === EFFECT 1: INTENSE HIGHLIGHT FLASH ===
 	-- Destroy any existing hitstun highlight
@@ -336,7 +340,7 @@ function EnemyVFXController:PlayHitstun(enemyModel: Model)
 	if existingHighlight then
 		existingHighlight:Destroy()
 	end
-	
+
 	local highlight = Instance.new("Highlight")
 	highlight.Name = "HitstunHighlight"
 	highlight.Adornee = enemyModel
@@ -347,43 +351,49 @@ function EnemyVFXController:PlayHitstun(enemyModel: Model)
 	highlight.OutlineTransparency = 0
 	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	highlight.Parent = enemyModel
-	
+
 	-- Animate highlight: white -> red -> fade out
 	task.spawn(function()
 		-- Hold white flash briefly
 		task.wait(0.05)
-		if not highlight or not highlight.Parent then return end
-		
+		if not highlight or not highlight.Parent then
+			return
+		end
+
 		-- Transition to red
 		highlight.FillColor = Color3.fromRGB(255, 50, 50)
 		highlight.FillTransparency = 0.2
-		
+
 		task.wait(0.05)
-		if not highlight or not highlight.Parent then return end
-		
+		if not highlight or not highlight.Parent then
+			return
+		end
+
 		-- Fade out
 		local fadeSteps = 4
 		for i = 1, fadeSteps do
 			task.wait(0.04)
-			if not highlight or not highlight.Parent then return end
-			
+			if not highlight or not highlight.Parent then
+				return
+			end
+
 			local alpha = i / fadeSteps
 			highlight.FillTransparency = 0.2 + (0.8 * alpha)
 			highlight.OutlineTransparency = alpha
 		end
-		
+
 		-- Cleanup
 		if highlight and highlight.Parent then
 			highlight:Destroy()
 		end
 	end)
-	
+
 	-- === EFFECT 2: IMPACT PARTICLES ===
 	-- NOTE: Size pulse removed - it was causing issues with attached health bars
 	local attachment = Instance.new("Attachment")
 	attachment.WorldPosition = rootPart.Position
 	attachment.Parent = workspace.Terrain
-	
+
 	-- Red/orange impact sparks
 	local impactParticles = Instance.new("ParticleEmitter")
 	impactParticles.Color = ColorSequence.new({
@@ -406,13 +416,13 @@ function EnemyVFXController:PlayHitstun(enemyModel: Model)
 	impactParticles.SpreadAngle = Vector2.new(180, 180)
 	impactParticles.Rate = 0
 	impactParticles.Parent = attachment
-	
+
 	-- Emit burst
 	impactParticles:Emit(12)
-	
+
 	-- Cleanup particles
 	Debris:AddItem(attachment, 0.5)
-	
+
 	-- Cleanup cooldown entry after a delay
 	task.delay(1, function()
 		if hitstunCooldowns[enemyModel] == now then
