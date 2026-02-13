@@ -530,15 +530,10 @@ end
     Handle attack input pressed
 ]]
 local function onAttackPressed()
-	-- DEBUG
-	print("Attack Pressed")
-
 	-- FLAMETHROWER CHECK: Activate immediately (bypass click throttle)
 	if ClassController and ClassController:IsClassSelected() then
 		local at = ClassController:GetAttackType()
-		print("Current Attack Type:", at)
 		if at == "Flamethrower" then
-			print("Flamethrower Activated!")
 			isFlamethrowerActive = true
 			return
 		end
@@ -1164,7 +1159,6 @@ end
     Start the controller
 ]]
 function CombatController:Start()
-	print("CombatController:Start() called")
 	-- Get remotes
 	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
 	if remotesFolder then
