@@ -11,6 +11,7 @@ sourcemap.json
 
 # Wally packages (downloaded dependencies - run `wally install` to restore)
 /Packages/
+/DevPackages/
 wally.lock
 
 # Manual backups (no longer needed with Git)
