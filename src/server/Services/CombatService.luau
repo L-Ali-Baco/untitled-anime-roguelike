@@ -238,15 +238,17 @@ local function applyKnockback(attacker: Model, target: Model, knockbackForce: nu
 end
 
 --[[
-    Process damage on a target
-    Returns: didDamage, targetDied
+	Internal helper to unify damage application logic
+	Returns: didDamage, targetDied
 ]]
-local function processDamage(attacker: Player, target: Model, attackIndex: number, attackId: string): (boolean, boolean)
-	-- Strict ID check: Attack ID must be valid string
-	if not attackId or attackId == "" then
-		return false, false
-	end
-
+local function _applyDamage(
+	attacker: Player,
+	target: Model,
+	attackId: string,
+	baseDamage: number,
+	knockbackForce: number?,
+	isRanged: boolean
+): (boolean, boolean)
 	-- Check if we already hit this target with this attack ID
 	if attackHitTargets[attackId] and attackHitTargets[attackId][target] then
 		return false, false -- Duplicate hit ignored
@@ -258,12 +260,6 @@ local function processDamage(attacker: Player, target: Model, attackIndex: numbe
 	end
 	attackHitTargets[attackId][target] = true
 
-	-- Get attack data
-	local attackData = CombatConfig.Attacks[attackIndex]
-	if not attackData then
-		return false, false
-	end
-
 	-- Get target humanoid
 	local humanoid = getTargetHumanoid(target)
 	if not humanoid or humanoid.Health <= 0 then
@@ -271,9 +267,9 @@ local function processDamage(attacker: Player, target: Model, attackIndex: numbe
 	end
 
 	-- Calculate damage
-	-- Base damage from attack data -> Modified by Items -> Global Multiplier
-	local damage = StatLib:GetStat(attacker, "Damage", attackData.Damage)
-	damage = damage * CombatConfig.Server.DamageMultiplier
+	-- Base damage -> Modified by Items -> Global Multiplier
+	local damage = StatLib:GetStat(attacker, "Damage", baseDamage)
+	damage = damage * (CombatConfig.Server.DamageMultiplier or 1)
 
 	-- Calculate Critical Hit
 	local critChance = StatLib:GetStat(attacker, "CritChance", 0) -- Base 0%
@@ -289,19 +285,17 @@ local function processDamage(attacker: Player, target: Model, attackIndex: numbe
 	end
 
 	-- Apply damage (Shield Logic)
-	local targetCharacter = target -- Model is the character
-	local currentShield = targetCharacter:GetAttribute("Shield") or 0
+	local currentShield = target:GetAttribute("Shield") or 0
 
 	if currentShield > 0 then
 		if currentShield >= damage then
 			-- Shield absorbs all damage
-			targetCharacter:SetAttribute("Shield", currentShield - damage)
+			target:SetAttribute("Shield", currentShield - damage)
 			damage = 0
-			-- Visual feedback for blocked damage?
 		else
 			-- Shield breaks
 			damage = damage - currentShield
-			targetCharacter:SetAttribute("Shield", 0)
+			target:SetAttribute("Shield", 0)
 		end
 	end
 
@@ -309,10 +303,14 @@ local function processDamage(attacker: Player, target: Model, attackIndex: numbe
 		humanoid:TakeDamage(damage)
 	end
 
+	if isRanged then
+		print("[CombatService] Dealt", damage, "ranged damage to", target.Name, "- HP:", humanoid.Health)
+	end
+
 	-- Apply knockback
 	local attackerCharacter = attacker.Character
-	if attackerCharacter then
-		applyKnockback(attackerCharacter, target, attackData.Knockback)
+	if attackerCharacter and knockbackForce then
+		applyKnockback(attackerCharacter, target, knockbackForce)
 	end
 
 	-- Process On-Hit Effects
@@ -323,11 +321,39 @@ local function processDamage(attacker: Player, target: Model, attackIndex: numbe
 	-- Check if target died
 	local targetDied = humanoid.Health <= 0
 
+	if isRanged then
+		print(
+			"[CombatService] processRangedDamage: Target health after damage:",
+			humanoid.Health,
+			"died:",
+			targetDied
+		)
+	end
+
 	if targetDied and ProcService then
 		ProcService:ProcessKill(attacker, target)
 	end
 
 	return true, targetDied
+end
+
+--[[
+    Process damage on a target
+    Returns: didDamage, targetDied
+]]
+local function processDamage(attacker: Player, target: Model, attackIndex: number, attackId: string): (boolean, boolean)
+	-- Strict ID check: Attack ID must be valid string
+	if not attackId or attackId == "" then
+		return false, false
+	end
+
+	-- Get attack data
+	local attackData = CombatConfig.Attacks[attackIndex]
+	if not attackData then
+		return false, false
+	end
+
+	return _applyDamage(attacker, target, attackId, attackData.Damage, attackData.Knockback, false)
 end
 
 --[[
@@ -513,85 +539,13 @@ local function processRangedDamage(
 	hitPosition: Vector3,
 	attackId: string
 ): (boolean, boolean)
-	-- Check if we already hit this target with this attack
-	if attackHitTargets[attackId] and attackHitTargets[attackId][target] then
-		return false, false
-	end
-
-	-- Mark target as hit by this attack
-	if not attackHitTargets[attackId] then
-		attackHitTargets[attackId] = {}
-	end
-	attackHitTargets[attackId][target] = true
-
 	-- Get ranged attack data from config
 	local rangedData = ClassConfig.Gunner.RangedAttack
 	if not rangedData then
 		return false, false
 	end
 
-	-- Get target humanoid
-	local humanoid = getTargetHumanoid(target)
-	if not humanoid or humanoid.Health <= 0 then
-		return false, false
-	end
-
-	-- Calculate damage
-	local baseDamage = rangedData.Damage
-	local damage = StatLib:GetStat(attacker, "Damage", baseDamage) * (CombatConfig.Server.DamageMultiplier or 1)
-
-	-- Calculate Critical Hit
-	local critChance = StatLib:GetStat(attacker, "CritChance", 0)
-	local isCrit = math.random() <= critChance
-	if isCrit then
-		damage = damage * 2.0
-	end
-
-	-- Apply Damage Resistance
-	local resistance = target:GetAttribute("DamageResistance") or 0
-	if resistance > 0 then
-		damage = damage * (1 - math.clamp(resistance, 0, 1))
-	end
-
-	-- Apply damage (Shield Logic)
-	local currentShield = target:GetAttribute("Shield") or 0
-
-	if currentShield > 0 then
-		if currentShield >= damage then
-			target:SetAttribute("Shield", currentShield - damage)
-			damage = 0
-		else
-			damage = damage - currentShield
-			target:SetAttribute("Shield", 0)
-		end
-	end
-
-	if damage > 0 then
-		humanoid:TakeDamage(damage)
-	end
-
-	print("[CombatService] Dealt", damage, "ranged damage to", target.Name, "- HP:", humanoid.Health)
-
-	-- Process On-Hit Effects
-	if ProcService then
-		ProcService:ProcessHit(attacker, target, damage, isCrit)
-	end
-
-	-- Apply light knockback
-	local attackerCharacter = attacker.Character
-	if attackerCharacter and rangedData.Knockback then
-		applyKnockback(attackerCharacter, target, rangedData.Knockback)
-	end
-
-	-- Check if target died
-	local targetDied = humanoid.Health <= 0
-	print("[CombatService] processRangedDamage: Target health after damage:", humanoid.Health, "died:", targetDied)
-
-	if targetDied and ProcService then
-		ProcService:ProcessKill(attacker, target)
-	end
-
-	return true, targetDied
+	return _applyDamage(attacker, target, attackId, rangedData.Damage, rangedData.Knockback, true)
 end
 
 --[[
