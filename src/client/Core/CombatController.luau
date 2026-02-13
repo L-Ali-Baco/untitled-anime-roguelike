@@ -266,7 +266,7 @@ end
 --[[
     Process hits on targets
 ]]
-local function processHits(hitTargets: { Model }, attackData: any, comboHit: number)
+local function processHits(hitTargets: { Model }, attackData: any, comboHit: number, attackId: string)
 	if #hitTargets == 0 then
 		return
 	end
@@ -318,7 +318,6 @@ local function processHits(hitTargets: { Model }, attackData: any, comboHit: num
 			-- Send to server for damage
 			-- Format: (attackIndex, targetModel, attackId)
 			if Remotes and Remotes.RequestAttack then
-				local attackId = LocalPlayer.UserId .. "_" .. attackIdCounter
 				Remotes.RequestAttack:FireServer(comboHit, target, attackId)
 			end
 
@@ -371,6 +370,13 @@ local function performAttack(comboHit: number)
 	canQueueNextAttack = false
 	queuedAttack = false
 	attackIdCounter += 1
+
+	-- Notify server of attack start (allows sequence validation even on miss)
+	local attackId = LocalPlayer.UserId .. "_" .. attackIdCounter
+	if Remotes and Remotes.RequestAttack then
+		Remotes.RequestAttack:FireServer(comboHit, nil, attackId)
+	end
+
 	table.clear(hitEnemiesThisSwing)
 
 	-- Reduce movement speed during attack
@@ -446,7 +452,7 @@ local function performAttack(comboHit: number)
 
 		-- Create hitbox using the CAPTURED direction but FRESH target position
 		local hitTargets = createHitbox(currentRootPart, attackData, capturedDirection, currentTargetPos)
-		processHits(hitTargets, attackData, comboHit)
+		processHits(hitTargets, attackData, comboHit, attackId)
 
 		-- Allow queueing next attack after hit lands
 		canQueueNextAttack = true

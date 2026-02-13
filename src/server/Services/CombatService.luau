@@ -41,6 +41,9 @@ local playerLastAttackId: { [Player]: string } = {}
 -- Track hits per attack to prevent duplicate damage
 local attackHitTargets: { [string]: { [Model]: boolean } } = {}
 
+-- Track combo state per player to prevent sequence exploits (e.g. skipping to attack 3)
+local playerComboState: { [Player]: { CurrentIndex: number, LastAttackTime: number } } = {}
+
 --[[
     Get the root part of a target (works for players and NPCs)
 ]]
@@ -115,8 +118,49 @@ local function validateAttack(
 	-- Only rate limit if this is a NEW attack (different attackId)
 	if attackId and lastAttackId == attackId then
 		-- Same attack, allow through (AOE multi-hit)
-	elseif now - lastAttack < minInterval then
-		return false, "Attack too fast"
+	else
+		-- New attack: Check rate limit
+		if now - lastAttack < minInterval then
+			return false, "Attack too fast"
+		end
+
+		-- New attack: Check Combo Sequence (Security Fix)
+		-- BikerKing uses Flamethrower (tick-based), always index 1
+		if className == "BikerKing" then
+			if attackIndex ~= 1 then
+				return false, "BikerKing invalid attack index"
+			end
+		else
+			-- Standard Melee Combo (1 -> 2 -> 3)
+			local comboState = playerComboState[player]
+			if not comboState then
+				comboState = { CurrentIndex = 0, LastAttackTime = 0 }
+				playerComboState[player] = comboState
+			end
+
+			-- Check for timeout (reset combo)
+			-- ResetTime + small latency buffer
+			local resetTime = CombatConfig.Combo.ResetTime + 0.2
+			local timeSinceLastCombo = now - comboState.LastAttackTime
+
+			if attackIndex == 1 then
+				-- Valid start of combo (or restart)
+				-- Always allowed
+			elseif attackIndex > 1 then
+				-- Must be sequential and within time window
+				if comboState.CurrentIndex ~= attackIndex - 1 then
+					-- Invalid sequence (e.g. skipped 1 to get to 2, or repeated 2)
+					return false, "Invalid combo sequence: Expected " .. (comboState.CurrentIndex + 1) .. ", got " .. attackIndex
+				end
+
+				if timeSinceLastCombo > resetTime then
+					-- Combo expired, should have restarted at 1
+					return false, "Combo expired"
+				end
+			else
+				return false, "Invalid attack index"
+			end
+		end
 	end
 
 	-- If no target, attack is valid (just swinging at air)
@@ -362,6 +406,13 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 	if attackId ~= lastAttackId then
 		playerLastAttack[player] = tick()
 		playerLastAttackId[player] = attackId
+
+		-- Update Combo State
+		if not playerComboState[player] then
+			playerComboState[player] = { CurrentIndex = 0, LastAttackTime = 0 }
+		end
+		playerComboState[player].CurrentIndex = attackIndex
+		playerComboState[player].LastAttackTime = tick()
 	end
 
 	-- Cleanup attack hit tracking after a short delay
@@ -657,6 +708,7 @@ function CombatService:Start()
 		playerLastAttack[player] = nil
 		playerLastRangedAttack[player] = nil
 		playerLastAttackId[player] = nil
+		playerComboState[player] = nil
 	end)
 
 	print("[CombatService] Started successfully")
