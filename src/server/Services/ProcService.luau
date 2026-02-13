@@ -17,6 +17,8 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local ItemRegistry = require(Shared:WaitForChild("Config"):WaitForChild("ItemRegistry"))
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
 
+local ItemService = require(script.Parent.ItemService)
+
 local ProcService = {
 	Name = "ProcService",
 }
@@ -118,14 +120,11 @@ end
     Process On-Hit Procs
 ]]
 function ProcService:ProcessHit(attacker: Player, target: Model, damageDealt: number, isCrit: boolean)
-	-- Check inventory
-	-- We need to read attributes since ItemService stores them there?
-	-- Or access ItemService.inventories directly?
-	-- Attributes is cleaner for decoupling.
+	local inventory = ItemService:GetPlayerInventory(attacker)
 	
-	for itemKey, item in pairs(ItemRegistry.Pool) do
-		local count = attacker:GetAttribute("Item_" .. itemKey) or 0
-		if count > 0 and item.Procs then
+	for itemKey, count in pairs(inventory) do
+		local item = ItemRegistry.GetItem(itemKey)
+		if item and item.Procs then
 			for _, proc in pairs(item.Procs) do
 				-- Check trigger type
 				local shouldTrigger = false
@@ -152,9 +151,11 @@ end
     Process On-Kill Procs
 ]]
 function ProcService:ProcessKill(attacker: Player, target: Model)
-	for itemKey, item in pairs(ItemRegistry.Pool) do
-		local count = attacker:GetAttribute("Item_" .. itemKey) or 0
-		if count > 0 and item.Procs then
+	local inventory = ItemService:GetPlayerInventory(attacker)
+
+	for itemKey, count in pairs(inventory) do
+		local item = ItemRegistry.GetItem(itemKey)
+		if item and item.Procs then
 			for _, proc in pairs(item.Procs) do
 				if proc.Type == "OnKill" then
 					-- Roll chance

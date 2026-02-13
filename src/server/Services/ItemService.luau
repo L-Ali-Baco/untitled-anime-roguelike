@@ -30,6 +30,13 @@ local function getRandomItemKey(): string
 end
 
 --[[
+    Get player inventory
+]]
+function ItemService:GetPlayerInventory(player: Player): { [string]: number }
+	return inventories[player] or {}
+end
+
+--[[
     Grant an item to a player
 ]]
 function ItemService:GrantItem(player: Player, itemKey: string)
