@@ -19,8 +19,125 @@ local OnEvent = Fusion.OnEvent
 
 -- Types
 type Scope = Fusion.Scope<typeof(Fusion)>
+type UsedAs<T> = Fusion.UsedAs<T>
+type Value<T> = Fusion.Value<T>
 
 local ItemDiscoveryScreen = {}
+
+--[[
+    Components
+]]
+
+local function RarityBar(scope: Scope, props: {
+	RarityColor: UsedAs<Color3>,
+	Transparency: UsedAs<number>,
+}): Instance
+	return scope:New("Frame")({
+		Name = "RarityBar",
+		Size = UDim2.new(1, 0, 0, 2),
+		Position = UDim2.new(0, 0, 1, 0),
+		BackgroundColor3 = props.RarityColor,
+		BackgroundTransparency = props.Transparency,
+	})
+end
+
+local function ItemNameLabel(scope: Scope, props: {
+	ItemData: UsedAs<any>,
+	Transparency: UsedAs<number>,
+}): Instance
+	return scope:New("TextLabel")({
+		Name = "ItemName",
+		Size = UDim2.new(1, 0, 0, 40),
+		Position = UDim2.new(0, 0, 0, 10),
+		BackgroundTransparency = 1,
+		Text = Computed(scope, function(use)
+			local data = use(props.ItemData)
+			return data and data.Name:upper() or ""
+		end),
+		TextColor3 = Color3.new(1, 1, 1),
+		TextTransparency = props.Transparency,
+		Font = Enum.Font.GothamBlack,
+		TextSize = 32,
+		TextStrokeTransparency = Computed(scope, function(use)
+			return 0.5 + (use(props.Transparency) * 0.5)
+		end),
+	})
+end
+
+local function RarityLabel(scope: Scope, props: {
+	ItemData: UsedAs<any>,
+	RarityColor: UsedAs<Color3>,
+	Transparency: UsedAs<number>,
+}): Instance
+	return scope:New("TextLabel")({
+		Name = "RarityLabel",
+		Size = UDim2.new(1, 0, 0, 20),
+		Position = UDim2.new(0, 0, 0, 45),
+		BackgroundTransparency = 1,
+		Text = Computed(scope, function(use)
+			local data = use(props.ItemData)
+			return data and data.Rarity:upper() or ""
+		end),
+		TextColor3 = props.RarityColor,
+		TextTransparency = props.Transparency,
+		Font = Enum.Font.GothamBold,
+		TextSize = 14,
+	})
+end
+
+local function DescriptionLabel(scope: Scope, props: {
+	ItemData: UsedAs<any>,
+	Transparency: UsedAs<number>,
+}): Instance
+	return scope:New("TextLabel")({
+		Name = "Description",
+		Size = UDim2.new(1, 0, 0, 20),
+		Position = UDim2.new(0, 0, 0, 65),
+		BackgroundTransparency = 1,
+		Text = Computed(scope, function(use)
+			local data = use(props.ItemData)
+			return data and data.Description or ""
+		end),
+		TextColor3 = Color3.fromRGB(200, 200, 200),
+		TextTransparency = props.Transparency,
+		Font = Enum.Font.Gotham,
+		TextSize = 16,
+	})
+end
+
+local function NotificationFrame(scope: Scope, props: {
+	ItemData: UsedAs<any>,
+	RarityColor: UsedAs<Color3>,
+	Transparency: UsedAs<number>,
+}): Instance
+	return scope:New("Frame")({
+		Name = "NotificationFrame",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.3, 0), -- Upper middle
+		Size = UDim2.new(0, 400, 0, 100),
+		BackgroundTransparency = 1,
+
+		[Children] = {
+			RarityBar(scope, {
+				RarityColor = props.RarityColor,
+				Transparency = props.Transparency,
+			}),
+			ItemNameLabel(scope, {
+				ItemData = props.ItemData,
+				Transparency = props.Transparency,
+			}),
+			RarityLabel(scope, {
+				ItemData = props.ItemData,
+				RarityColor = props.RarityColor,
+				Transparency = props.Transparency,
+			}),
+			DescriptionLabel(scope, {
+				ItemData = props.ItemData,
+				Transparency = props.Transparency,
+			}),
+		},
+	})
+end
 
 --[[
     Create the Item Discovery UI
@@ -47,6 +164,13 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 		return ItemRegistry.Rarities[data.Rarity] or Color3.new(1, 1, 1)
 	end)
 
+	-- Component
+	local notificationFrame = NotificationFrame(scope, {
+		ItemData = itemData,
+		RarityColor = rarityColor,
+		Transparency = transparency,
+	})
+
 	-- UI
 	local LocalPlayer = Players.LocalPlayer
 	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -59,75 +183,7 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 		Enabled = isVisible,
 
 		[Children] = {
-			-- Main Notification Frame
-			scope:New("Frame")({
-				Name = "NotificationFrame",
-				AnchorPoint = Vector2.new(0.5, 0.5),
-				Position = UDim2.new(0.5, 0, 0.3, 0), -- Upper middle
-				Size = UDim2.new(0, 400, 0, 100),
-				BackgroundTransparency = 1,
-
-				[Children] = {
-					-- Background Glow/Bar
-					scope:New("Frame")({
-						Size = UDim2.new(1, 0, 0, 2),
-						Position = UDim2.new(0, 0, 1, 0),
-						BackgroundColor3 = rarityColor,
-						BackgroundTransparency = transparency,
-					}),
-
-					-- Item Name (Big)
-					scope:New("TextLabel")({
-						Name = "ItemName",
-						Size = UDim2.new(1, 0, 0, 40),
-						Position = UDim2.new(0, 0, 0, 10),
-						BackgroundTransparency = 1,
-						Text = Computed(scope, function(use)
-							local data = use(itemData)
-							return data and data.Name:upper() or ""
-						end),
-						TextColor3 = Color3.new(1, 1, 1),
-						TextTransparency = transparency,
-						Font = Enum.Font.GothamBlack,
-						TextSize = 32,
-						TextStrokeTransparency = Computed(scope, function(use)
-							return 0.5 + (use(transparency) * 0.5)
-						end),
-					}),
-
-					-- Rarity Label
-					scope:New("TextLabel")({
-						Name = "RarityLabel",
-						Size = UDim2.new(1, 0, 0, 20),
-						Position = UDim2.new(0, 0, 0, 45),
-						BackgroundTransparency = 1,
-						Text = Computed(scope, function(use)
-							local data = use(itemData)
-							return data and data.Rarity:upper() or ""
-						end),
-						TextColor3 = rarityColor,
-						TextTransparency = transparency,
-						Font = Enum.Font.GothamBold,
-						TextSize = 14,
-					}),
-
-					-- Description
-					scope:New("TextLabel")({
-						Name = "Description",
-						Size = UDim2.new(1, 0, 0, 20),
-						Position = UDim2.new(0, 0, 0, 65),
-						BackgroundTransparency = 1,
-						Text = Computed(scope, function(use)
-							local data = use(itemData)
-							return data and data.Description or ""
-						end),
-						TextColor3 = Color3.fromRGB(200, 200, 200),
-						TextTransparency = transparency,
-						Font = Enum.Font.Gotham,
-						TextSize = 16,
-					}),
-				},
-			}),
+			notificationFrame,
 		},
 	})
 
@@ -139,7 +195,7 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 
 			-- Animate in
 			local tweenIn = TweenService:Create(
-				screenGui.NotificationFrame,
+				notificationFrame,
 				TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
 				{ Position = UDim2.new(0.5, 0, 0.35, 0) }
 			)
@@ -154,7 +210,7 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 				transparency:set(0)
 			end)
 
-			screenGui.NotificationFrame.Position = UDim2.new(0.5, 0, 0.25, 0)
+			notificationFrame.Position = UDim2.new(0.5, 0, 0.25, 0)
 			tweenIn:Play()
 
 			-- Wait then fade out
