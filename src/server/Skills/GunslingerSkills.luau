@@ -47,14 +47,20 @@ function GunslingerSkills.BuckshotBlast(player: Player, skillData: any)
 		if result and result.Instance then
 			local model = result.Instance:FindFirstAncestorOfClass("Model")
 			if model then
-				local hum = model:FindFirstChildOfClass("Humanoid")
-				if hum then
-					print(" - Buckshot hit:", model.Name)
-					hum:TakeDamage(damagePerBullet)
-					-- Knockback
-					local enemyRoot = model:FindFirstChild("HumanoidRootPart")
-					if enemyRoot then
-						enemyRoot.AssemblyLinearVelocity = dir * 30
+				-- Validate target is enemy
+				if
+					CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag)
+					or CollectionService:HasTag(model, "TrainingDummy")
+				then
+					local hum = model:FindFirstChildOfClass("Humanoid")
+					if hum then
+						print(" - Buckshot hit:", model.Name)
+						hum:TakeDamage(damagePerBullet)
+						-- Knockback
+						local enemyRoot = model:FindFirstChild("HumanoidRootPart")
+						if enemyRoot then
+							enemyRoot.AssemblyLinearVelocity = dir * 30
+						end
 					end
 				end
 			end
