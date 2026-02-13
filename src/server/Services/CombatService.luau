@@ -22,6 +22,9 @@ local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatC
 local ClassConfig = require(Shared:WaitForChild("Config"):WaitForChild("ClassConfig"))
 local StatLib = require(Shared:WaitForChild("Lib"):WaitForChild("StatLib"))
 
+-- Services
+local ClassService = require(script.Parent.ClassService)
+
 local CombatService = {
 	Name = "CombatService",
 }
@@ -78,7 +81,6 @@ local function validateAttack(player: Player, attackIndex: number, targetModel: 
 	end
 
 	-- Get Class Service for dynamic rate limiting
-	local ClassService = require(script.Parent.ClassService)
 	local className = ClassService:GetPlayerClass(player) or "Warrior"
 	local classData = ClassConfig[className]
 	
