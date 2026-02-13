@@ -44,6 +44,40 @@ local ProjectileEffects = nil
 local DamageNumbers = nil
 local EnemyVFXController = nil
 
+-- Object Pooling for VFX
+local partPool = {}
+
+local function getPartFromPool(name)
+	if not partPool[name] then
+		partPool[name] = {}
+	end
+	local part = table.remove(partPool[name])
+	if not part then
+		part = Instance.new("Part")
+		part.Name = name
+		part.Anchored = true
+		part.CanCollide = false
+		part.CanQuery = false
+		part.CanTouch = false
+		part.CastShadow = false
+	end
+
+	-- Increment generation to invalidate old tasks
+	local gen = (part:GetAttribute("Generation") or 0) + 1
+	part:SetAttribute("Generation", gen)
+
+	return part, gen
+end
+
+local function returnPartToPool(part)
+	part.Parent = nil
+	local name = part.Name
+	if not partPool[name] then
+		partPool[name] = {}
+	end
+	table.insert(partPool[name], part)
+end
+
 -- Remote events (set in Start)
 local Remotes = nil
 
@@ -976,49 +1010,50 @@ local function handleFlamethrowerTick(dt)
 			local startSize = ftData.CubeStartSize or 1.0
 			local endSize = ftData.CubeEndSize or 5.0
 			
-			local cube = Instance.new("Part")
-			cube.Name = "AnimeFire"
-			cube.Anchored = true
-			cube.CanCollide = false
-			cube.CanQuery = false
-			cube.CanTouch = false
+			local cube, gen = getPartFromPool("AnimeFire")
 			cube.Material = Enum.Material.Neon
 			cube.Size = Vector3.new(startSize, startSize, startSize)
-			
+
 			-- High Intensity Start Color (Bright Yellow-White)
 			cube.Color = Color3.fromRGB(255, 255, 200)
 			cube.Transparency = 0
-			
-			local rot = CFrame.Angles(math.random()*6, math.random()*6, math.random()*6)
+
+			local rot = CFrame.Angles(math.random() * 6, math.random() * 6, math.random() * 6)
 			cube.CFrame = originCFrame * rot
 			cube.Parent = workspace.Terrain
-			Debris:AddItem(cube, lifetime + 0.1)
-			
+			task.delay(lifetime + 0.1, returnPartToPool, cube)
+
 			local travelDist = speed * lifetime
 			local endPos = originCFrame.Position + dir * travelDist + Vector3.new(0, 4, 0) -- Reduced rise
-			
+
 			-- Smoother Expansion (Quad instead of Back)
 			local tweenInfo = TweenInfo.new(lifetime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-			local targetRot = rot * CFrame.Angles(math.random()*3, math.random()*3, math.random()*3)
-			
+			local targetRot = rot * CFrame.Angles(math.random() * 3, math.random() * 3, math.random() * 3)
+
 			local tween = TweenService:Create(cube, tweenInfo, {
 				CFrame = CFrame.new(endPos) * targetRot,
 				Size = Vector3.new(endSize, endSize, endSize),
-				Transparency = 1
+				Transparency = 1,
 			})
 			tween:Play()
-			
+
 			-- Stylized Flame Palette (Yellow -> Vibrant Orange -> Warm Red -> Dark Smoke)
 			task.spawn(function()
 				task.wait(lifetime * 0.1)
-				if not cube.Parent then return end
-				TweenService:Create(cube, TweenInfo.new(lifetime * 0.2), {Color = Color3.fromRGB(255, 180, 50)}):Play() -- Warm Orange
+				if cube:GetAttribute("Generation") ~= gen or not cube.Parent then
+					return
+				end
+				TweenService:Create(cube, TweenInfo.new(lifetime * 0.2), { Color = Color3.fromRGB(255, 180, 50) }):Play() -- Warm Orange
 				task.wait(lifetime * 0.2)
-				if not cube.Parent then return end
-				TweenService:Create(cube, TweenInfo.new(lifetime * 0.3), {Color = Color3.fromRGB(200, 60, 20)}):Play() -- Burnt Red
+				if cube:GetAttribute("Generation") ~= gen or not cube.Parent then
+					return
+				end
+				TweenService:Create(cube, TweenInfo.new(lifetime * 0.3), { Color = Color3.fromRGB(200, 60, 20) }):Play() -- Burnt Red
 				task.wait(lifetime * 0.2)
-				if not cube.Parent then return end
-				TweenService:Create(cube, TweenInfo.new(lifetime * 0.2), {Color = Color3.fromRGB(60, 60, 60)}):Play() -- Smoke Grey
+				if cube:GetAttribute("Generation") ~= gen or not cube.Parent then
+					return
+				end
+				TweenService:Create(cube, TweenInfo.new(lifetime * 0.2), { Color = Color3.fromRGB(60, 60, 60) }):Play() -- Smoke Grey
 			end)
 		end
 	end
@@ -1034,24 +1069,21 @@ local function handleFlamethrowerTick(dt)
 			local speed = (ftData.StraySpeed or 110) * (0.7 + math.random() * 0.6)
 			local lifetime = (ftData.StrayLifetime or 0.35)
 			
-			local spark = Instance.new("Part")
-			spark.Name = "FireSpark"
-			spark.Anchored = true
-			spark.CanCollide = false
-			spark.CanQuery = false
+			local spark = getPartFromPool("FireSpark")
 			spark.Material = Enum.Material.Neon
 			spark.Size = Vector3.new(0.2, 0.2, 0.2)
 			spark.Color = Color3.fromRGB(255, 255, 180)
+			spark.Transparency = 0
 			spark.CFrame = originCFrame
 			spark.Parent = workspace.Terrain
-			Debris:AddItem(spark, lifetime + 0.1)
-			
+			task.delay(lifetime + 0.1, returnPartToPool, spark)
+
 			local endPos = originCFrame.Position + dir * (speed * lifetime)
-			
+
 			TweenService:Create(spark, TweenInfo.new(lifetime, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {
 				Position = endPos,
 				Size = Vector3.new(0, 0, 0),
-				Transparency = 0.5
+				Transparency = 0.5,
 			}):Play()
 		end
 	end
