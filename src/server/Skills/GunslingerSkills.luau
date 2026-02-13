@@ -7,6 +7,7 @@ local CollectionService = game:GetService("CollectionService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
 local StatLib = require(Shared:WaitForChild("Lib"):WaitForChild("StatLib"))
+local CombatLib = require(Shared:WaitForChild("Lib"):WaitForChild("CombatLib"))
 
 local GunslingerSkills = {}
 
@@ -93,33 +94,20 @@ function GunslingerSkills.TetherMine(player: Player, skillData: any)
 		local center = mine.Position
 		
 		-- Find enemies
-		-- (Reuse getEnemiesInRadius logic or copy paste for now)
-		local overlapParams = OverlapParams.new()
-		overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-		overlapParams.FilterDescendantsInstances = {character}
-		local parts = workspace:GetPartBoundsInRadius(center, radius, overlapParams)
-		
-		local affected = {}
-		for _, part in parts do
-			local model = part:FindFirstAncestorOfClass("Model")
-			if model and not affected[model] then
-				-- Validate target is enemy
-				if CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag) or CollectionService:HasTag(model, "TrainingDummy") then
-					local hum = model:FindFirstChildOfClass("Humanoid")
-					local eRoot = model:FindFirstChild("HumanoidRootPart")
-					if hum and eRoot then
-						affected[model] = true
-						
-						-- Pull logic
-						local dir = (center - eRoot.Position).Unit
-						eRoot.AssemblyLinearVelocity = dir * pullForce + Vector3.new(0, 10, 0)
-						
-						-- Damage
-						local baseDamage = 10
-						local damageStat = StatLib:GetStat(player, "Damage", baseDamage)
-						hum:TakeDamage(damageStat * skillData.Damage)
-					end
-				end
+		local enemies = CombatLib.getEnemiesInRadius(center, radius, { character })
+
+		for _, model in enemies do
+			local hum = model:FindFirstChildOfClass("Humanoid")
+			local eRoot = model:FindFirstChild("HumanoidRootPart")
+			if hum and eRoot then
+				-- Pull logic
+				local dir = (center - eRoot.Position).Unit
+				eRoot.AssemblyLinearVelocity = dir * pullForce + Vector3.new(0, 10, 0)
+
+				-- Damage
+				local baseDamage = 10
+				local damageStat = StatLib:GetStat(player, "Damage", baseDamage)
+				hum:TakeDamage(damageStat * skillData.Damage)
 			end
 		end
 		

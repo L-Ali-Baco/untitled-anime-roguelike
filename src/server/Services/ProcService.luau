@@ -16,46 +16,19 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local ItemRegistry = require(Shared:WaitForChild("Config"):WaitForChild("ItemRegistry"))
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
+local CombatLib = require(Shared:WaitForChild("Lib"):WaitForChild("CombatLib"))
 
 local ProcService = {
 	Name = "ProcService",
 }
 
 -- References
-local CombatService = nil -- Circular dependency if required directly? We'll see. 
+local CombatService = nil -- Circular dependency if required directly? We'll see.
 -- CombatService calls ProcService, ProcService might need to deal damage via CombatService logic?
 -- Better to handle damage directly here or replicate essential logic.
 
 -- Cooldowns for procs per player/item to prevent infinite loops or lag
 local procCooldowns = {} -- [Player][ProcID] = time
-
---[[
-    Helper: Get enemies in radius
-]]
-local function getEnemiesInRadius(position: Vector3, radius: number, excludeModel: Model?): { Model }
-	local enemies = {}
-	local overlapParams = OverlapParams.new()
-	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-	overlapParams.FilterDescendantsInstances = { excludeModel }
-	
-	local parts = workspace:GetPartBoundsInRadius(position, radius, overlapParams)
-	local checked = {}
-	
-	for _, part in parts do
-		local model = part:FindFirstAncestorOfClass("Model")
-		if model and not checked[model] then
-			checked[model] = true
-			local humanoid = model:FindFirstChildOfClass("Humanoid")
-			if humanoid and humanoid.Health > 0 then
-				if CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag) or CollectionService:HasTag(model, "TrainingDummy") then
-					table.insert(enemies, model)
-				end
-			end
-		end
-	end
-	
-	return enemies
-end
 
 --[[
     Effect: Chain Lightning (Static Filament)
@@ -68,10 +41,9 @@ local function triggerChainLightning(attacker: Player, primaryTarget: Model, pro
 	-- We'll assume base damage is passed or fetched.
 	
 	-- Note: Ideally we'd pass original hit damage. Let's update ProcessHit signature.
-	
 	local radius = procData.Radius or 20
-	local enemies = getEnemiesInRadius(primaryTarget:GetPivot().Position, radius, primaryTarget)
-	
+	local enemies = CombatLib.getEnemiesInRadius(primaryTarget:GetPivot().Position, radius, { primaryTarget })
+
 	-- Pick random targets (limit 3 for now)
 	local chainCount = 0
 	local maxChain = 3
@@ -100,10 +72,10 @@ local function triggerExplosion(attacker: Player, deadTarget: Model, procData: a
 	local radius = procData.Radius + (5 * (stackCount - 1)) -- Scaling radius
 	local damageMult = procData.Damage * stackCount
 	local baseDamage = 10 -- Placeholder
-	
+
 	local pos = deadTarget:GetPivot().Position
-	local enemies = getEnemiesInRadius(pos, radius, deadTarget)
-	
+	local enemies = CombatLib.getEnemiesInRadius(pos, radius, { deadTarget })
+
 	for _, enemy in enemies do
 		local humanoid = enemy:FindFirstChildOfClass("Humanoid")
 		if humanoid then

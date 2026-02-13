@@ -10,37 +10,9 @@ local CollectionService = game:GetService("CollectionService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
 local StatLib = require(Shared:WaitForChild("Lib"):WaitForChild("StatLib"))
+local CombatLib = require(Shared:WaitForChild("Lib"):WaitForChild("CombatLib"))
 
 local BikerKingSkills = {}
-
--- Helper to find enemies in radius (same pattern as VanguardSkills)
-local function getEnemiesInRadius(position: Vector3, radius: number): { Model }
-	local enemies = {}
-	local overlapParams = OverlapParams.new()
-	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-	overlapParams.FilterDescendantsInstances = {}
-
-	local parts = workspace:GetPartBoundsInRadius(position, radius, overlapParams)
-	local checked = {}
-
-	for _, part in parts do
-		local model = part:FindFirstAncestorOfClass("Model")
-		if model and not checked[model] then
-			checked[model] = true
-			if
-				CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag)
-				or CollectionService:HasTag(model, "TrainingDummy")
-			then
-				local hum = model:FindFirstChildOfClass("Humanoid")
-				if hum and hum.Health > 0 then
-					table.insert(enemies, model)
-				end
-			end
-		end
-	end
-
-	return enemies
-end
 
 -- Helper to apply burn DoT to a single enemy
 local function applyBurn(
@@ -126,7 +98,7 @@ function BikerKingSkills.InfernoRamp(player: Player, skillData: any)
 			end
 
 			-- Find and burn all enemies in close range
-			local enemies = getEnemiesInRadius(rootPart.Position, 12)
+			local enemies = CombatLib.getEnemiesInRadius(rootPart.Position, 12)
 			for _, enemy in enemies do
 				applyBurn(player, enemy, burnDamagePerTick, burnDuration, burnTickRate)
 			end
@@ -182,7 +154,7 @@ function BikerKingSkills.FlameCircle(player: Player, skillData: any)
 				break
 			end
 
-			local enemies = getEnemiesInRadius(rootPart.Position, radius)
+			local enemies = CombatLib.getEnemiesInRadius(rootPart.Position, radius)
 			print("[BikerKingSkills] Flame Circle tick", i, "- found", #enemies, "enemies")
 
 			for _, enemy in enemies do
@@ -264,7 +236,7 @@ function BikerKingSkills.MeteorStomp(player: Player, skillData: any)
 					local stompPos = rootPart.Position
 
 					-- Find enemies in stomp radius
-					local enemies = getEnemiesInRadius(stompPos, radius)
+					local enemies = CombatLib.getEnemiesInRadius(stompPos, radius)
 					local hitEnemy = false
 
 					print(
