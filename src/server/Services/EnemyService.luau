@@ -21,6 +21,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local EnemyConfig = require(Shared:WaitForChild("Config"):WaitForChild("EnemyConfig"))
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
+local MovementConfig = require(Shared:WaitForChild("Config"):WaitForChild("MovementConfig"))
 
 local EnemyService = {
 	Name = "EnemyService",
@@ -40,7 +41,10 @@ local AIState = {
 local activeEnemies: { [Model]: EnemyData } = {}
 
 -- Track player I-frame states (for dodge damage immunity)
-local playerIFrames: { [Player]: boolean } = {}
+-- Stores expiry timestamp (tick()) to prevent client-authoritative indefinite invincibility
+local playerIFrames: { [Player]: number } = {}
+-- Track last dash time for server-side cooldown enforcement
+local playerLastDash: { [Player]: number } = {}
 
 -- Type definition for enemy data
 type EnemyData = {
@@ -340,7 +344,8 @@ local function performAttack(enemyData: EnemyData)
 		end
 
 		-- Check if player has I-frames (dodge immunity)
-		if playerIFrames[target] then
+		local iframeExpiry = playerIFrames[target]
+		if iframeExpiry and tick() < iframeExpiry then
 			-- Player dodged! Send blocked event for VFX
 			local damageBlockedRemote = Remotes:GetEvent("DamageBlocked")
 			if damageBlockedRemote then
@@ -847,13 +852,28 @@ function EnemyService:Start()
 	local iframeRemote = Remotes:GetEvent("IFrameStateChanged")
 	if iframeRemote then
 		iframeRemote.OnServerEvent:Connect(function(player: Player, isInvincible: boolean)
-			playerIFrames[player] = isInvincible or nil -- Store true or remove entry
+			if isInvincible then
+				local now = tick()
+				local lastDash = playerLastDash[player] or 0
+				local dashConfig = MovementConfig.Dash
+				local minInterval = (dashConfig.Duration + dashConfig.Cooldown) * 0.9 -- 10% grace period
+
+				-- Enforce cooldown and max duration on server
+				if now - lastDash >= minInterval then
+					playerLastDash[player] = now
+					playerIFrames[player] = now + dashConfig.IFrameDuration + 0.1 -- 0.1s grace for latency
+				end
+			else
+				-- Client ended dash normally
+				playerIFrames[player] = nil
+			end
 		end)
 	end
 
 	-- Cleanup I-frame state when player leaves
 	Players.PlayerRemoving:Connect(function(player)
 		playerIFrames[player] = nil
+		playerLastDash[player] = nil
 	end)
 
 	-- AI update loop
