@@ -16,6 +16,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local ItemRegistry = require(Shared:WaitForChild("Config"):WaitForChild("ItemRegistry"))
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
+local StatLib = require(Shared:WaitForChild("Lib"):WaitForChild("StatLib"))
 
 local ItemService = require(script.Parent.ItemService)
 
@@ -64,12 +65,9 @@ end
 ]]
 local function triggerChainLightning(attacker: Player, primaryTarget: Model, procData: any, stackCount: number)
 	local damageMult = procData.Damage * stackCount
-	local baseDamage = 10 -- TODO: Get player base damage or pass actual damage dealt
-	-- For simplicity, let's say proc damage is % of the hit that triggered it? 
-	-- Or % of player base damage. ItemConfig says "40% DMG". Usually implies base damage.
-	-- We'll assume base damage is passed or fetched.
 	
-	-- Note: Ideally we'd pass original hit damage. Let's update ProcessHit signature.
+	-- Fetch player's dynamic base damage from StatLib
+	local baseDamage = StatLib:GetStat(attacker, "Damage", 10) * (CombatConfig.Server.DamageMultiplier or 1)
 	
 	local radius = procData.Radius or 20
 	local enemies = getEnemiesInRadius(primaryTarget:GetPivot().Position, radius, primaryTarget)
@@ -101,7 +99,9 @@ end
 local function triggerExplosion(attacker: Player, deadTarget: Model, procData: any, stackCount: number)
 	local radius = procData.Radius + (5 * (stackCount - 1)) -- Scaling radius
 	local damageMult = procData.Damage * stackCount
-	local baseDamage = 10 -- Placeholder
+
+	-- Fetch player's dynamic base damage from StatLib
+	local baseDamage = StatLib:GetStat(attacker, "Damage", 10) * (CombatConfig.Server.DamageMultiplier or 1)
 	
 	local pos = deadTarget:GetPivot().Position
 	local enemies = getEnemiesInRadius(pos, radius, deadTarget)
