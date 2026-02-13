@@ -657,12 +657,10 @@ local function performRangedAttack()
 	end
 
 	-- Raycast
-	local raycastParams = RaycastParams.new()
-	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = { character }
+	sharedRaycastParams.FilterDescendantsInstances = { character }
 
 	local maxRange = rangedData.Range or 60
-	local rayResult = workspace:Raycast(muzzlePos, aimDirection * maxRange, raycastParams)
+	local rayResult = workspace:Raycast(muzzlePos, aimDirection * maxRange, sharedRaycastParams)
 
 	local hitPosition: Vector3
 	local hitNormal: Vector3?
