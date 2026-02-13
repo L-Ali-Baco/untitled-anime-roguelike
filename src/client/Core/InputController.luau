@@ -104,7 +104,6 @@ local function onInputBegan(input: InputObject, gameProcessed: boolean)
 
 	-- Mouse secondary (M2)
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
-		print("M2 Pressed")
 		InputController.OnSecondaryPressed:Fire()
 		return
 	end
@@ -139,10 +138,8 @@ local function onInputBegan(input: InputObject, gameProcessed: boolean)
 		interactJustPressed = true
 		InputController.OnInteractPressed:Fire()
 	elseif input.KeyCode == Enum.KeyCode.E then
-		print("E Pressed")
 		InputController.OnSkill1Pressed:Fire()
 	elseif input.KeyCode == Enum.KeyCode.R then
-		print("R Pressed")
 		InputController.OnSkill2Pressed:Fire()
 	end
 end

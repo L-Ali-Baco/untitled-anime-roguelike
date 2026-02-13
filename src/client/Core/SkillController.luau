@@ -74,11 +74,8 @@ local function tryUseSkill(slot: string)
 	local now = tick()
 	local cdEnd = localCooldowns[slot] or 0
 	if now < cdEnd then
-		print("Skill on cooldown")
 		return
 	end
-
-	print("Requesting skill:", slot)
 
 	-- Send request (Target info removed/ignored as per directional change)
 	local remote = Remotes:GetEvent("RequestSkill")
@@ -95,8 +92,6 @@ end
 ]]
 local function onSkillUsed(player, slot, skillData)
 	if player == Players.LocalPlayer then
-		print("Used Skill (Server Confirmed):", skillData.Name)
-
 		-- Ensure local cooldown is synced
 		localCooldowns[slot] = tick() + skillData.Cooldown
 
@@ -113,7 +108,6 @@ end
 ]]
 local function onSkillCooldown(slot, remaining)
 	localCooldowns[slot] = tick() + remaining
-	print("Skill on cooldown:", slot, remaining)
 end
 
 function SkillController:Init()
