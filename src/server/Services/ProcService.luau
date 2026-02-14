@@ -63,12 +63,19 @@ end
 --[[
     Effect: Chain Lightning (Static Filament)
 ]]
-local function triggerChainLightning(attacker: Player, primaryTarget: Model, procData: any, stackCount: number)
+local function triggerChainLightning(
+	attacker: Player,
+	primaryTarget: Model,
+	procData: any,
+	stackCount: number,
+	inventory: { [string]: number }?
+)
 	local damageMult = procData.Damage * stackCount
-	
+
 	-- Fetch player's dynamic base damage from StatLib
-	local baseDamage = StatLib:GetStat(attacker, "Damage", 10) * (CombatConfig.Server.DamageMultiplier or 1)
-	
+	local baseDamage = StatLib:GetStat(attacker, "Damage", 10, inventory)
+		* (CombatConfig.Server.DamageMultiplier or 1)
+
 	local radius = procData.Radius or 20
 	local enemies = getEnemiesInRadius(primaryTarget:GetPivot().Position, radius, primaryTarget)
 	
@@ -96,13 +103,20 @@ end
 --[[
     Effect: Explosion (Volatile Casing)
 ]]
-local function triggerExplosion(attacker: Player, deadTarget: Model, procData: any, stackCount: number)
+local function triggerExplosion(
+	attacker: Player,
+	deadTarget: Model,
+	procData: any,
+	stackCount: number,
+	inventory: { [string]: number }?
+)
 	local radius = procData.Radius + (5 * (stackCount - 1)) -- Scaling radius
 	local damageMult = procData.Damage * stackCount
 
 	-- Fetch player's dynamic base damage from StatLib
-	local baseDamage = StatLib:GetStat(attacker, "Damage", 10) * (CombatConfig.Server.DamageMultiplier or 1)
-	
+	local baseDamage = StatLib:GetStat(attacker, "Damage", 10, inventory)
+		* (CombatConfig.Server.DamageMultiplier or 1)
+
 	local pos = deadTarget:GetPivot().Position
 	local enemies = getEnemiesInRadius(pos, radius, deadTarget)
 	
@@ -136,7 +150,7 @@ function ProcService:ProcessHit(attacker: Player, target: Model, damageDealt: nu
 					if math.random() <= proc.Chance then
 						-- Trigger!
 						if proc.Id == "ChainLightning" then
-							triggerChainLightning(attacker, target, proc, count)
+							triggerChainLightning(attacker, target, proc, count, inventory)
 						elseif proc.Id == "Vacuum" then
 							-- triggerVacuum(...)
 						end
@@ -161,7 +175,7 @@ function ProcService:ProcessKill(attacker: Player, target: Model)
 					-- Roll chance
 					if math.random() <= proc.Chance then
 						if proc.Id == "Explosion" then
-							triggerExplosion(attacker, target, proc, count)
+							triggerExplosion(attacker, target, proc, count, inventory)
 						end
 					end
 				end
