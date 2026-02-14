@@ -24,6 +24,7 @@ local StatLib = require(Shared:WaitForChild("Lib"):WaitForChild("StatLib"))
 
 -- Services
 local ClassService = require(script.Parent.ClassService)
+local ItemService = require(script.Parent.ItemService)
 
 local CombatService = {
 	Name = "CombatService",
@@ -102,7 +103,8 @@ local function validateAttack(
 
 	-- Apply Attack Speed multiplier from items
 	-- Higher attack speed = Lower interval
-	local attackSpeedMult = StatLib:GetStat(player, "AttackRate", 1.0)
+	local inventory = ItemService:GetPlayerInventory(player)
+	local attackSpeedMult = StatLib:GetStat(player, "AttackRate", 1.0, inventory)
 	minInterval = minInterval / attackSpeedMult
 
 	-- Add small grace period for latency variance (ping jitter)
@@ -268,11 +270,12 @@ local function _applyDamage(
 
 	-- Calculate damage
 	-- Base damage -> Modified by Items -> Global Multiplier
-	local damage = StatLib:GetStat(attacker, "Damage", baseDamage)
+	local inventory = ItemService:GetPlayerInventory(attacker)
+	local damage = StatLib:GetStat(attacker, "Damage", baseDamage, inventory)
 	damage = damage * (CombatConfig.Server.DamageMultiplier or 1)
 
 	-- Calculate Critical Hit
-	local critChance = StatLib:GetStat(attacker, "CritChance", 0) -- Base 0%
+	local critChance = StatLib:GetStat(attacker, "CritChance", 0, inventory) -- Base 0%
 	local isCrit = math.random() <= critChance
 	if isCrit then
 		damage = damage * 2.0
