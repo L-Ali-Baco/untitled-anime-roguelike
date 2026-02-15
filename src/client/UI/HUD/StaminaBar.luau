@@ -6,6 +6,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
 
 local Fusion = require(ReplicatedStorage.Packages.Fusion)
 local StaminaConfig = require(ReplicatedStorage.Shared.Config.StaminaConfig)
@@ -37,6 +38,7 @@ function StaminaBar.new(staminaController: any): () -> ()
 	-- State
 	local staminaPercent = scope:Value(1)
 	local isLowStamina = scope:Value(false)
+	local isActionFailed = scope:Value(false)
 
 	-- Listen to stamina changes
 	local connection = staminaController.OnStaminaChanged:Connect(function(current, max, percent)
@@ -44,8 +46,31 @@ function StaminaBar.new(staminaController: any): () -> ()
 		isLowStamina:set(percent <= StaminaConfig.LowStaminaThreshold)
 	end)
 
+	-- Listen to action failed
+	local failConnection = staminaController.OnStaminaActionFailed:Connect(function()
+		isActionFailed:set(true)
+
+		-- Play sound
+		local sound = Instance.new("Sound")
+		sound.SoundId = "rbxassetid://4612375233"
+		sound.Volume = 0.5
+		sound.Parent = SoundService
+		sound:Play()
+		task.delay(1, function()
+			sound:Destroy()
+		end)
+
+		-- Reset visual after delay
+		task.delay(0.3, function()
+			isActionFailed:set(false)
+		end)
+	end)
+
 	-- Bar fill color (changes when low)
 	local barColor = Computed(scope, function(use)
+		if use(isActionFailed) then
+			return Color3.fromRGB(255, 50, 50) -- Red when failed
+		end
 		if use(isLowStamina) then
 			return Color3.fromRGB(255, 150, 50) -- Orange when low
 		end
@@ -158,6 +183,7 @@ function StaminaBar.new(staminaController: any): () -> ()
 	-- Return cleanup function
 	return function()
 		connection:Disconnect()
+		failConnection:Disconnect()
 		Fusion.doCleanup(scope)
 	end
 end
