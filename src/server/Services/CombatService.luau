@@ -14,6 +14,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
+local RunService = game:GetService("RunService")
 
 -- Wait for shared modules
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -40,6 +41,8 @@ local playerLastAttackId: { [Player]: string } = {}
 
 -- Track hits per attack to prevent duplicate damage
 local attackHitTargets: { [string]: { [Model]: boolean } } = {}
+-- OPTIMIZATION: Centralized queue for attack cleanup to reduce scheduler overhead
+local activeAttacks: { { id: string, expiry: number } } = {}
 
 -- Track combo state per player to prevent sequence exploits (e.g. skipping to attack 3)
 local playerComboState: { [Player]: { CurrentIndex: number, LastAttackTime: number } } = {}
@@ -442,9 +445,8 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 	end
 
 	-- Cleanup attack hit tracking after a short delay
-	task.delay(1, function()
-		attackHitTargets[attackId] = nil
-	end)
+	-- OPTIMIZATION: Use centralized queue instead of task.delay to reduce scheduler overhead
+	table.insert(activeAttacks, { id = attackId, expiry = tick() + 1 })
 end
 
 -- ============================================================================
@@ -615,9 +617,8 @@ local function onRequestRangedHit(player: Player, targetModel: Model?, hitPositi
 	end
 
 	-- Cleanup attack hit tracking after a short delay
-	task.delay(0.5, function()
-		attackHitTargets[attackId] = nil
-	end)
+	-- OPTIMIZATION: Use centralized queue instead of task.delay to reduce scheduler overhead
+	table.insert(activeAttacks, { id = attackId, expiry = tick() + 0.5 })
 end
 
 --[[
@@ -635,6 +636,25 @@ end
 ]]
 function CombatService:Start()
 	print("[CombatService] Starting...")
+
+	-- Start cleanup loop
+	-- OPTIMIZATION: Batch cleanup operations to reduce scheduler overhead
+	RunService.Heartbeat:Connect(function()
+		local now = tick()
+		-- Process queue from the start (oldest entries first)
+		while #activeAttacks > 0 do
+			local entry = activeAttacks[1]
+			if now >= entry.expiry then
+				-- Remove the attack hit tracking data
+				attackHitTargets[entry.id] = nil
+				-- Remove from queue
+				table.remove(activeAttacks, 1)
+			else
+				-- If oldest entry hasn't expired, newer ones won't either
+				break
+			end
+		end
+	end)
 
 	-- Load ProcService
 	ProcService = require(script.Parent.ProcService)
