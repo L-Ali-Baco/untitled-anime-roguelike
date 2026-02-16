@@ -419,8 +419,11 @@ local function applySpeedCurve(track: AnimationTrack, duration: number, curve: {
 end
 
 --[[
-    Perform a leap attack (multi-phase: wind-up -> jump -> fly -> land slam)
-    Used for gap-closing abilities like the Brute's LeapSlam
+    Perform a leap attack (multi-phase gap-closer)
+    Phase 1: Wind-up (kneel/crouch on ground, slow animation)
+    Phase 2: Launch UP (rise straight up to peak height, kneel anim continues)
+    Phase 3: Horizontal flight (mid-air loop anim, fly toward target's position)
+    Phase 4: Landing slam (slam anim, AoE damage at impact)
 ]]
 local function performLeapAttack(enemyData: EnemyData)
 	if not enemyData.Target then
@@ -434,8 +437,9 @@ local function performLeapAttack(enemyData: EnemyData)
 	end
 
 	local windupDuration = attackData.WindupDuration or 1.2
+	local launchDuration = attackData.LaunchDuration or 0.5
 	local flightDuration = attackData.FlightDuration or 0.6
-	local flightHeight = attackData.FlightHeight or 25
+	local flightHeight = attackData.FlightHeight or 40
 	local landDuration = attackData.LandDuration or 0.8
 	local attackDamage = attackData.Damage or 25
 	local hitRadius = attackData.HitRadius or 20
@@ -454,7 +458,9 @@ local function performLeapAttack(enemyData: EnemyData)
 	-- Face target before wind-up
 	faceTarget(enemyData)
 
-	-- === PHASE 1: WIND-UP (slow crouch animation) ===
+	-- ================================================================
+	-- PHASE 1: WIND-UP (kneel/crouch on the ground)
+	-- ================================================================
 	local windupTrack = nil
 	if attackData.WindupAnimId and enemyData.Animator then
 		pcall(function()
@@ -467,7 +473,7 @@ local function performLeapAttack(enemyData: EnemyData)
 		end)
 	end
 
-	-- Fire wind-up VFX event
+	-- Fire wind-up VFX event (dust swirling inward)
 	local enemyAttackRemote = Remotes:GetEvent("EnemyAttack")
 	if enemyAttackRemote then
 		enemyAttackRemote:FireAllClients({
@@ -479,7 +485,7 @@ local function performLeapAttack(enemyData: EnemyData)
 		})
 	end
 
-	-- Wait for wind-up to complete
+	-- Wait for wind-up to complete (kneeling on ground)
 	task.wait(windupDuration)
 
 	-- Validate still alive
@@ -490,20 +496,80 @@ local function performLeapAttack(enemyData: EnemyData)
 		return
 	end
 
-	-- === PHASE 2: LAUNCH + FLIGHT ===
+	-- ================================================================
+	-- PHASE 2: LAUNCH UP (rise straight up to peak height)
+	-- Wind-up anim continues playing during the rise (natural transition)
+	-- ================================================================
+	local startPos = rootPart.Position
+	local baseY = startPos.Y
+
+	-- Anchor for controlled movement
+	local wasAnchored = rootPart.Anchored
+	rootPart.Anchored = true
+	if enemyData.LinearVelocity then
+		enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+	end
+
+	-- Speed up wind-up anim slightly during launch (looks like powering up)
+	if windupTrack then
+		windupTrack:AdjustSpeed(0.8)
+	end
+
+	-- Rise straight up with eased motion (fast start, slow at peak)
+	local launchStart = tick()
+	while true do
+		local elapsed = tick() - launchStart
+		local t = math.clamp(elapsed / launchDuration, 0, 1)
+		if t >= 1 then
+			break
+		end
+
+		-- Ease-out: fast at start, slows near peak
+		local easedT = 1 - (1 - t) * (1 - t)
+		local currentY = baseY + flightHeight * easedT
+
+		-- Stay in same XZ position, just go UP
+		rootPart.CFrame = CFrame.lookAt(
+			Vector3.new(startPos.X, currentY, startPos.Z),
+			Vector3.new(startPos.X, currentY, startPos.Z) + rootPart.CFrame.LookVector
+		)
+
+		task.wait()
+	end
+
+	-- Snap to peak height
+	local peakY = baseY + flightHeight
+	rootPart.CFrame = CFrame.lookAt(
+		Vector3.new(startPos.X, peakY, startPos.Z),
+		Vector3.new(startPos.X, peakY, startPos.Z) + rootPart.CFrame.LookVector
+	)
+
+	-- Validate still alive
+	if not rootPart or not rootPart.Parent or enemyData.State == AIState.Dead then
+		if windupTrack then
+			windupTrack:Stop()
+		end
+		rootPart.Anchored = wasAnchored
+		return
+	end
+
+	-- ================================================================
+	-- PHASE 3: HORIZONTAL FLIGHT (fly toward target with loop anim)
+	-- ================================================================
 	-- Get target's current position for landing
 	local targetPos = getTargetPosition(target)
 	if not targetPos then
 		if windupTrack then
 			windupTrack:Stop()
 		end
+		rootPart.Anchored = wasAnchored
 		enemyData.State = AIState.Chase
 		return
 	end
 
-	-- Stop wind-up, play mid-air loop
+	-- Stop wind-up, start mid-air loop
 	if windupTrack then
-		windupTrack:Stop(0.1)
+		windupTrack:Stop(0.15)
 	end
 
 	local midairTrack = nil
@@ -518,18 +584,10 @@ local function performLeapAttack(enemyData: EnemyData)
 		end)
 	end
 
-	-- Disable gravity and move through the air
-	local startPos = rootPart.Position
-	local landingPos = targetPos -- Aim for player's current position
+	local flightStartPos = rootPart.Position -- At peak height
+	local landingPos = targetPos -- Target's ground position
 
-	-- Temporarily make the enemy anchored for flight control
-	local wasAnchored = rootPart.Anchored
-	rootPart.Anchored = true
-	if enemyData.LinearVelocity then
-		enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
-	end
-
-	-- Animate flight arc (parabolic: up at start, down at end)
+	-- Fly from peak height down toward landing position
 	local flightStart = tick()
 	while true do
 		local elapsed = tick() - flightStart
@@ -538,32 +596,32 @@ local function performLeapAttack(enemyData: EnemyData)
 			break
 		end
 
-		-- Parabolic height: peaks at t=0.5
-		local heightT = 4 * t * (1 - t) -- 0 at start/end, 1 at peak
-		local currentHeight = flightHeight * heightT
+		-- Ease-in for the descent: slow start, accelerating down (gravity feel)
+		local easedT = t * t
 
-		-- Horizontal lerp from start to landing
-		local horizontalPos = startPos:Lerp(landingPos, t)
+		-- Horizontal: lerp from flight start XZ toward landing XZ
+		local currentX = flightStartPos.X + (landingPos.X - flightStartPos.X) * t
+		local currentZ = flightStartPos.Z + (landingPos.Z - flightStartPos.Z) * t
 
-		-- Set position with height offset
-		rootPart.CFrame = CFrame.new(
-			horizontalPos.X,
-			math.max(startPos.Y, landingPos.Y) + currentHeight,
-			horizontalPos.Z
-		) * CFrame.new(0, 0, 0) -- Keep orientation
+		-- Vertical: lerp from peak height down to landing height (ease-in)
+		local currentY = flightStartPos.Y + (landingPos.Y - flightStartPos.Y) * easedT
 
 		-- Face the landing spot
-		local lookDir = (landingPos - rootPart.Position)
-		if lookDir.Magnitude > 1 then
-			local lookCFrame =
-				CFrame.lookAt(rootPart.Position, Vector3.new(landingPos.X, rootPart.Position.Y, landingPos.Z))
-			rootPart.CFrame = lookCFrame + (rootPart.Position - lookCFrame.Position)
+		local currentPos = Vector3.new(currentX, currentY, currentZ)
+		local lookTarget = Vector3.new(landingPos.X, currentY, landingPos.Z)
+		if (lookTarget - currentPos).Magnitude > 1 then
+			rootPart.CFrame = CFrame.lookAt(currentPos, lookTarget)
+		else
+			rootPart.CFrame = CFrame.new(currentPos)
+				* CFrame.Angles(0, select(2, rootPart.CFrame:ToEulerAnglesYXZ()), 0)
 		end
 
 		task.wait()
 	end
 
-	-- === PHASE 3: LANDING ===
+	-- ================================================================
+	-- PHASE 4: LANDING SLAM
+	-- ================================================================
 	-- Restore physics
 	rootPart.Anchored = wasAnchored
 
@@ -587,12 +645,12 @@ local function performLeapAttack(enemyData: EnemyData)
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 	rayParams.FilterDescendantsInstances = CollectionService:GetTagged(CombatConfig.Targeting.TargetTag)
 	local rayOrigin = Vector3.new(landingPos.X, rootPart.Position.Y + 5, landingPos.Z)
-	local rayResult = workspace:Raycast(rayOrigin, Vector3.new(0, -50, 0), rayParams)
+	local rayResult = workspace:Raycast(rayOrigin, Vector3.new(0, -60, 0), rayParams)
 	local impactPos = if rayResult then rayResult.Position else landingPos
 
 	-- Snap to ground
 	rootPart.CFrame = CFrame.new(impactPos.X, impactPos.Y + 3, impactPos.Z)
-		* CFrame.Angles(0, rootPart.CFrame:ToEulerAnglesYXZ())
+		* CFrame.Angles(0, select(2, rootPart.CFrame:ToEulerAnglesYXZ()), 0)
 
 	-- Fire landing VFX event
 	if enemyAttackRemote then
@@ -606,7 +664,7 @@ local function performLeapAttack(enemyData: EnemyData)
 		})
 	end
 
-	-- Hit detection at landing point
+	-- Hit detection at landing point (AoE — hits ALL players in radius)
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
 		if not character then
@@ -901,10 +959,39 @@ local function updateEnemyAI(enemyData: EnemyData, deltaTime: number)
 					end
 				end
 			else
-				-- Move toward target
-				moveTowardTarget(enemyData)
-				-- Face the target while chasing
-				faceTarget(enemyData)
+				-- Check if we can gap-close with a leap attack from chase distance
+				local canLeap = false
+				if config.Attacks and now - enemyData.LastAttackTime >= (config.AttackCooldown or 1.5) then
+					for _, atk in config.Attacks do
+						if atk.Type == "Leap" and atk.MinRange and atk.MaxRange then
+							if distance >= atk.MinRange and distance <= atk.MaxRange then
+								-- Trigger leap from chase distance!
+								enemyData.State = AIState.Attack
+								enemyData.LastAttackTime = now
+								enemyData.AttackTriggered = false
+								enemyData.IsMoving = false
+								enemyData.LastMoveTarget = nil
+								if enemyData.LinearVelocity then
+									enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+								end
+								if enemyData.WalkTrack and enemyData.WalkTrack.IsPlaying then
+									enemyData.WalkTrack:Stop(0.15)
+								end
+								-- Force-select the leap attack (CurrentAttack pre-set)
+								enemyData.CurrentAttack = atk
+								canLeap = true
+								break
+							end
+						end
+					end
+				end
+
+				if not canLeap then
+					-- Move toward target normally
+					moveTowardTarget(enemyData)
+					-- Face the target while chasing
+					faceTarget(enemyData)
+				end
 			end
 		end
 	elseif enemyData.State == AIState.Attack then
@@ -915,18 +1002,18 @@ local function updateEnemyAI(enemyData: EnemyData, deltaTime: number)
 		if not enemyData.AttackTriggered then
 			enemyData.AttackTriggered = true
 
-			-- Select attack from Attacks table if available
-			local attackData = nil
-			if config.Attacks then
-				-- Calculate distance for range-filtered attack selection
-				local attackTargetPos = getTargetPosition(enemyData.Target)
-				local atkDist = if attackTargetPos
-					then (attackTargetPos - enemyData.RootPart.Position).Magnitude
-					else nil
-				attackData = pickWeightedAttack(config.Attacks, atkDist)
-				enemyData.CurrentAttack = attackData
-			else
-				enemyData.CurrentAttack = nil
+			-- Select attack (or use pre-selected from gap-close trigger)
+			local attackData = enemyData.CurrentAttack
+			if not attackData then
+				if config.Attacks then
+					-- Calculate distance for range-filtered attack selection
+					local attackTargetPos = getTargetPosition(enemyData.Target)
+					local atkDist = if attackTargetPos
+						then (attackTargetPos - enemyData.RootPart.Position).Magnitude
+						else nil
+					attackData = pickWeightedAttack(config.Attacks, atkDist)
+					enemyData.CurrentAttack = attackData
+				end
 			end
 
 			-- Determine animation ID and duration from attack data or legacy config

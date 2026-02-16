@@ -112,15 +112,16 @@ return {
 					LandAnimId = "rbxassetid://119288108301982",
 					WindupDuration = 1.2, -- Slow, dramatic crouch
 					WindupAnimSpeed = 0.4, -- Very slow animation at start
-					FlightDuration = 0.6, -- Time in the air
-					FlightHeight = 25, -- Studs above ground at peak
+					LaunchDuration = 0.5, -- Rise straight up to peak
+					FlightDuration = 0.6, -- Horizontal flight toward target
+					FlightHeight = 40, -- Studs above ground at peak (big dramatic jump)
 					LandDuration = 0.8, -- Recovery after landing
 					Damage = 25, -- Big damage for landing
 					HitRadius = 20, -- Landing slam AoE
 					ForwardDist = 0, -- Damage centered on landing spot
 					VFXType = "LeapSlam",
 					Weight = 0.5, -- Less frequent than normal attacks
-					MinRange = 20, -- Only use when far from target
+					MinRange = 30, -- Gap-closer: only when player is far (beyond melee)
 					MaxRange = 60, -- Don't leap if too far
 				},
 			},
