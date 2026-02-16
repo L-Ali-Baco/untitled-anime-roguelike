@@ -22,6 +22,7 @@ local CharacterState = require(ReplicatedStorage.Shared.Enums.CharacterState)
 local MovementConfig = require(ReplicatedStorage.Shared.Config.MovementConfig)
 local StatLib = require(ReplicatedStorage.Shared.Lib.StatLib)
 local CharacterLib = require(ReplicatedStorage.Shared.Lib.CharacterLib)
+local EnemyLib = require(ReplicatedStorage.Shared.Lib.EnemyLib)
 
 local CombatController = {}
 CombatController.Name = "CombatController"
@@ -242,8 +243,7 @@ local function createHitbox(
 	for _, part in partsInBox do
 		local character = part:FindFirstAncestorOfClass("Model")
 		if character and not charactersHit[character] then
-			local humanoid = character:FindFirstChildOfClass("Humanoid")
-			if humanoid and humanoid.Health > 0 and character ~= LocalPlayer.Character then
+			if EnemyLib:IsAlive(character) and character ~= LocalPlayer.Character then
 				-- Check if not already hit this swing
 				if not hitEnemiesThisSwing[character] then
 					charactersHit[character] = true
@@ -423,7 +423,6 @@ local function performAttack(comboHit: number)
 
 	-- Biker King: VOXEL FLAMETHROWER moved to Heartbeat loop (continuous)
 	-- See handleFlamethrowerTick logic
-
 
 	-- Capture the direction and target position at time of attack for the delayed hitbox
 	local capturedDirection = attackDir
@@ -711,8 +710,7 @@ local function performRangedAttack()
 		if hitPart then
 			local hitModel = hitPart:FindFirstAncestorOfClass("Model")
 			if hitModel then
-				local hitHumanoid = hitModel:FindFirstChildOfClass("Humanoid")
-				if hitHumanoid and hitHumanoid.Health > 0 and hitModel ~= character then
+				if EnemyLib:IsAlive(hitModel) and hitModel ~= character then
 					hitTarget = hitModel
 					didHit = true
 				end
@@ -883,14 +881,16 @@ local function handleFlamethrowerTick(dt)
 			local baseSpeed = StatLib:GetStat(LocalPlayer, "WalkSpeed", MovementConfig.WalkSpeed)
 			humanoid.WalkSpeed = baseSpeed
 		end
-		
+
 		-- Destroy light
 		local char = LocalPlayer.Character
 		if char and char:FindFirstChild("HumanoidRootPart") then
 			local light = char.HumanoidRootPart:FindFirstChild("FlamethrowerLight")
-			if light then light:Destroy() end
+			if light then
+				light:Destroy()
+			end
 		end
-		
+
 		-- Stop Animation
 		if flamethrowerTrack then
 			flamethrowerTrack:Stop(0.2)
@@ -903,10 +903,14 @@ local function handleFlamethrowerTick(dt)
 	-- 2. Config Check
 	local classData = ClassController:GetClassData("BikerKing")
 	local ftData = classData and classData.FlamethrowerAttack
-	if not ftData then return end
+	if not ftData then
+		return
+	end
 
 	local char, humanoid, rootPart = getCharacterParts()
-	if not char or not humanoid or not rootPart then return end
+	if not char or not humanoid or not rootPart then
+		return
+	end
 
 	-- 2.5 Animation
 	if not flamethrowerTrack then
@@ -918,19 +922,19 @@ local function handleFlamethrowerTick(dt)
 		local anim = Instance.new("Animation")
 		anim.AnimationId = animId
 		anim.Name = "FlamethrowerHold"
-		
+
 		local animator = humanoid:FindFirstChildOfClass("Animator")
 		if not animator then
 			animator = Instance.new("Animator")
 			animator.Parent = humanoid
 		end
-		
+
 		flamethrowerTrack = animator:LoadAnimation(anim)
 		flamethrowerTrack.Priority = Enum.AnimationPriority.Action
 		flamethrowerTrack.Looped = true
 		flamethrowerTrack:Play(0.2)
 	end
-	
+
 	if flamethrowerTrack and not flamethrowerTrack.IsPlaying then
 		flamethrowerTrack:Play(0.1)
 	end
@@ -962,17 +966,17 @@ local function handleFlamethrowerTick(dt)
 			local angle = tick() * 12 + (math.random() * 2)
 			local turbX = math.sin(angle) * 0.15
 			local turbY = math.cos(angle * 0.7) * 0.15
-			
+
 			local spreadX = (math.random() - 0.5) * 0.4 + turbX
 			local spreadY = (math.random() - 0.5) * 0.4 + turbY
-			
+
 			local dir = (forwardDir + rightDir * spreadX + upDir * spreadY).Unit
 			local speed = (ftData.FlameSpeed or 45) * (0.85 + math.random() * 0.4)
 			local lifetime = 0.6 + math.random() * 0.3
-			
+
 			local startSize = ftData.CubeStartSize or 1.0
 			local endSize = ftData.CubeEndSize or 5.0
-			
+
 			local cube, gen = getPartFromPool("AnimeFire")
 			cube.Material = Enum.Material.Neon
 			cube.Size = Vector3.new(startSize, startSize, startSize)
@@ -1006,7 +1010,8 @@ local function handleFlamethrowerTick(dt)
 				if cube:GetAttribute("Generation") ~= gen or not cube.Parent then
 					return
 				end
-				TweenService:Create(cube, TweenInfo.new(lifetime * 0.2), { Color = Color3.fromRGB(255, 180, 50) }):Play() -- Warm Orange
+				TweenService:Create(cube, TweenInfo.new(lifetime * 0.2), { Color = Color3.fromRGB(255, 180, 50) })
+					:Play() -- Warm Orange
 				task.wait(lifetime * 0.2)
 				if cube:GetAttribute("Generation") ~= gen or not cube.Parent then
 					return
@@ -1027,11 +1032,11 @@ local function handleFlamethrowerTick(dt)
 			local spreadAmount = ftData.StraySpread or 1.0
 			local spreadX = (math.random() - 0.5) * spreadAmount
 			local spreadY = (math.random() - 0.5) * spreadAmount
-			
+
 			local dir = (forwardDir + rightDir * spreadX + upDir * spreadY).Unit
 			local speed = (ftData.StraySpeed or 110) * (0.7 + math.random() * 0.6)
 			local lifetime = (ftData.StrayLifetime or 0.35)
-			
+
 			local spark = getPartFromPool("FireSpark")
 			spark.Material = Enum.Material.Neon
 			spark.Size = Vector3.new(0.2, 0.2, 0.2)
@@ -1043,11 +1048,13 @@ local function handleFlamethrowerTick(dt)
 
 			local endPos = originCFrame.Position + dir * (speed * lifetime)
 
-			TweenService:Create(spark, TweenInfo.new(lifetime, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {
-				Position = endPos,
-				Size = Vector3.new(0, 0, 0),
-				Transparency = 0.5,
-			}):Play()
+			TweenService
+				:Create(spark, TweenInfo.new(lifetime, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {
+					Position = endPos,
+					Size = Vector3.new(0, 0, 0),
+					Transparency = 0.5,
+				})
+				:Play()
 		end
 	end
 
@@ -1066,37 +1073,36 @@ local function handleFlamethrowerTick(dt)
 	local now = os.clock()
 	if now - lastFlamethrowerTick >= ftData.TickRate then
 		lastFlamethrowerTick = now
-		
+
 		local range = ftData.Range or 35
 		local angleCos = math.cos(math.rad((ftData.ConeAngle or 45) / 2))
-		
+
 		local overlapParams = OverlapParams.new()
 		overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-		overlapParams.FilterDescendantsInstances = {char}
-		
+		overlapParams.FilterDescendantsInstances = { char }
+
 		local candidates = workspace:GetPartBoundsInRadius(rootPart.Position, range, overlapParams)
 		local hits = {}
-		
+
 		local forward = rootPart.CFrame.LookVector
-		
+
 		for _, part in candidates do
 			local model = part:FindFirstAncestorOfClass("Model")
 			if model and model ~= char and not hits[model] then
-				local eHum = model:FindFirstChild("Humanoid")
-				if eHum and eHum.Health > 0 then
+				if EnemyLib:IsAlive(model) then
 					local dist = (part.Position - rootPart.Position).Magnitude
 					if dist < 6 then
 						hits[model] = true
 					else
 						local dirToTarget = (part.Position - rootPart.Position).Unit
 						if forward:Dot(dirToTarget) >= angleCos then
-							 hits[model] = true
+							hits[model] = true
 						end
 					end
 				end
 			end
 		end
-		
+
 		local hitList = {}
 		for enemy, _ in hits do
 			table.insert(hitList, enemy)
@@ -1104,10 +1110,10 @@ local function handleFlamethrowerTick(dt)
 				CombatEffects:SpawnHitEffects(enemy.PrimaryPart.Position, nil, 1)
 			end
 		end
-		
+
 		if #hitList > 0 then
 			if Remotes.RequestAttack then
-				Remotes.RequestAttack:FireServer(1, hitList, {IsFlamethrower = true})
+				Remotes.RequestAttack:FireServer(1, hitList, { IsFlamethrower = true })
 			end
 		end
 	end
@@ -1182,42 +1188,48 @@ function CombatController:Start()
 	if InputController then
 		table.insert(connections, InputController.OnAttackPressed:Connect(onAttackPressed))
 	end
-	
+
 	if DashController then
 		table.insert(connections, DashController.OnDashStarted:Connect(onDashStarted))
 	end
-	
-	table.insert(connections, RunService.Heartbeat:Connect(onHeartbeat))
-	
-	table.insert(connections, LocalPlayer.CharacterAdded:Connect(function(character)
-		isAttacking = false
-		isFlamethrowerActive = false
-		currentComboHit = 0
-		queuedAttack = false
-		lastRangedFireTime = 0
-		table.clear(hitEnemiesThisSwing)
 
-		local humanoid = character:WaitForChild("Humanoid", 5)
-		if humanoid then
-			originalWalkSpeed = humanoid.WalkSpeed
-		end
-	end))
-	
+	table.insert(connections, RunService.Heartbeat:Connect(onHeartbeat))
+
+	table.insert(
+		connections,
+		LocalPlayer.CharacterAdded:Connect(function(character)
+			isAttacking = false
+			isFlamethrowerActive = false
+			currentComboHit = 0
+			queuedAttack = false
+			lastRangedFireTime = 0
+			table.clear(hitEnemiesThisSwing)
+
+			local humanoid = character:WaitForChild("Humanoid", 5)
+			if humanoid then
+				originalWalkSpeed = humanoid.WalkSpeed
+			end
+		end)
+	)
+
 	if Remotes and Remotes.HitConfirmed then
-		table.insert(connections, Remotes.HitConfirmed.OnClientEvent:Connect(function(hitData)
-			if hitData.Attacker == LocalPlayer and HitstopController and hitData.Hitstop then
-				-- Hitstop logic
-			end
-			if CombatEffects and hitData.HitPosition then
-				if hitData.Attacker and hitData.Attacker.Character then
-					local attackerClass = hitData.Attacker:GetAttribute("Class")
-					if attackerClass == "BikerKing" then
-						CombatEffects:SpawnFireHitEffect(hitData.HitPosition, hitData.AttackIndex)
-					end
+		table.insert(
+			connections,
+			Remotes.HitConfirmed.OnClientEvent:Connect(function(hitData)
+				if hitData.Attacker == LocalPlayer and HitstopController and hitData.Hitstop then
+					-- Hitstop logic
 				end
-				CombatEffects:SpawnHitEffects(hitData.HitPosition, nil, hitData.AttackIndex)
-			end
-		end))
+				if CombatEffects and hitData.HitPosition then
+					if hitData.Attacker and hitData.Attacker.Character then
+						local attackerClass = hitData.Attacker:GetAttribute("Class")
+						if attackerClass == "BikerKing" then
+							CombatEffects:SpawnFireHitEffect(hitData.HitPosition, hitData.AttackIndex)
+						end
+					end
+					CombatEffects:SpawnHitEffects(hitData.HitPosition, nil, hitData.AttackIndex)
+				end
+			end)
+		)
 	end
 
 	print("[CombatController] Started")

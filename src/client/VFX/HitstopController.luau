@@ -52,11 +52,18 @@ local function isEnemyModel(model: Model): boolean
 
 	-- Check if it's NOT the local player's character (anything else might be enemy)
 	if model ~= LocalPlayer.Character then
+		-- Check for IsEnemy attribute (new humanoid-free system)
+		if model:GetAttribute("IsEnemy") then
+			return true
+		end
+		-- Fallback: check if it has the targeting tag
+		if CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag) then
+			return true
+		end
+		-- Legacy: check for Humanoid (training dummies, etc)
 		local humanoid = model:FindFirstChildOfClass("Humanoid")
 		if humanoid then
-			-- Has humanoid but isn't our character - likely an enemy/NPC
-			-- Be conservative: check if it has the targeting tag
-			if CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag) then
+			if CollectionService:HasTag(model, "TrainingDummy") then
 				return true
 			end
 		end
@@ -126,16 +133,22 @@ local function freezeCharacter(character: Model)
 		freezePart(rootPart)
 	end
 
-	-- Freeze all animations
+	-- Freeze all animations (works with Humanoid/Animator or AnimationController/Animator)
+	local animator = nil
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		local animator = humanoid:FindFirstChildOfClass("Animator")
-		if animator then
-			for _, track in animator:GetPlayingAnimationTracks() do
-				if not frozenAnimations[track] then
-					frozenAnimations[track] = track.Speed
-					track:AdjustSpeed(0)
-				end
+		animator = humanoid:FindFirstChildOfClass("Animator")
+	else
+		local animController = character:FindFirstChildOfClass("AnimationController")
+		if animController then
+			animator = animController:FindFirstChildOfClass("Animator")
+		end
+	end
+	if animator then
+		for _, track in animator:GetPlayingAnimationTracks() do
+			if not frozenAnimations[track] then
+				frozenAnimations[track] = track.Speed
+				track:AdjustSpeed(0)
 			end
 		end
 	end
@@ -154,17 +167,23 @@ local function unfreezeCharacter(character: Model)
 		unfreezePart(rootPart)
 	end
 
-	-- Restore animation speeds
+	-- Restore animation speeds (works with Humanoid/Animator or AnimationController/Animator)
+	local animator = nil
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		local animator = humanoid:FindFirstChildOfClass("Animator")
-		if animator then
-			for _, track in animator:GetPlayingAnimationTracks() do
-				local originalSpeed = frozenAnimations[track]
-				if originalSpeed then
-					track:AdjustSpeed(originalSpeed)
-					frozenAnimations[track] = nil
-				end
+		animator = humanoid:FindFirstChildOfClass("Animator")
+	else
+		local animController = character:FindFirstChildOfClass("AnimationController")
+		if animController then
+			animator = animController:FindFirstChildOfClass("Animator")
+		end
+	end
+	if animator then
+		for _, track in animator:GetPlayingAnimationTracks() do
+			local originalSpeed = frozenAnimations[track]
+			if originalSpeed then
+				track:AdjustSpeed(originalSpeed)
+				frozenAnimations[track] = nil
 			end
 		end
 	end

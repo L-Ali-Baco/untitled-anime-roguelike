@@ -7,6 +7,7 @@ local CollectionService = game:GetService("CollectionService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
 local StatLib = require(Shared:WaitForChild("Lib"):WaitForChild("StatLib"))
+local EnemyLib = require(Shared:WaitForChild("Lib"):WaitForChild("EnemyLib"))
 
 local GunslingerSkills = {}
 
@@ -54,12 +55,11 @@ function GunslingerSkills.BuckshotBlast(player: Player, skillData: any)
 					CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag)
 					or CollectionService:HasTag(model, "TrainingDummy")
 				then
-					local hum = model:FindFirstChildOfClass("Humanoid")
-					if hum then
+					if EnemyLib:IsAlive(model) then
 						print(" - Buckshot hit:", model.Name)
-						hum:TakeDamage(damagePerBullet)
+						EnemyLib:TakeDamage(model, damagePerBullet)
 						-- Knockback
-						local enemyRoot = model:FindFirstChild("HumanoidRootPart")
+						local enemyRoot = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
 						if enemyRoot then
 							enemyRoot.AssemblyLinearVelocity = dir * 30
 						end
@@ -118,9 +118,8 @@ function GunslingerSkills.TetherMine(player: Player, skillData: any)
 					CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag)
 					or CollectionService:HasTag(model, "TrainingDummy")
 				then
-					local hum = model:FindFirstChildOfClass("Humanoid")
-					local eRoot = model:FindFirstChild("HumanoidRootPart")
-					if hum and eRoot then
+					local eRoot = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+					if EnemyLib:IsAlive(model) and eRoot then
 						affected[model] = true
 
 						-- Pull logic
@@ -130,7 +129,7 @@ function GunslingerSkills.TetherMine(player: Player, skillData: any)
 						-- Damage
 						local baseDamage = 10
 						local damageStat = StatLib:GetStat(player, "Damage", baseDamage)
-						hum:TakeDamage(damageStat * skillData.Damage)
+						EnemyLib:TakeDamage(model, damageStat * skillData.Damage)
 					end
 				end
 			end

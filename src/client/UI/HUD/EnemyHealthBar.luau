@@ -19,6 +19,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local EnemyConfig = require(ReplicatedStorage.Shared.Config.EnemyConfig)
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
 local ClassConfig = require(ReplicatedStorage.Shared.Config.ClassConfig)
+local EnemyLib = require(ReplicatedStorage.Shared.Lib.EnemyLib)
 
 local EnemyHealthBar = {}
 
@@ -317,10 +318,12 @@ end
 --[[
 	Create health bar UI for an enemy
 ]]
-local function createHealthBar(enemy: Model, humanoid: Humanoid): HealthBarData?
-	-- Hide Roblox's default health bar
-	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-	humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+local function createHealthBar(enemy: Model, humanoid: Humanoid?): HealthBarData?
+	-- Hide Roblox's default health bar (only if humanoid exists)
+	if humanoid then
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+	end
 
 	-- Find attachment point (head or root)
 	local head = enemy:FindFirstChild("Head")
@@ -449,7 +452,7 @@ local function createHealthBar(enemy: Model, humanoid: Humanoid): HealthBarData?
 	-- Create data
 	local data: HealthBarData = {
 		Enemy = enemy,
-		Humanoid = humanoid,
+		Humanoid = humanoid, -- May be nil for attribute-based enemies
 		Billboard = billboard,
 		FillBar = fillBar,
 		DamageBar = damageBar,
@@ -457,85 +460,135 @@ local function createHealthBar(enemy: Model, humanoid: Humanoid): HealthBarData?
 		Highlight = nil, -- Created dynamically when in range
 		IsInRange = false,
 		IsFlashing = false,
-		CurrentHealth = humanoid.Health,
-		MaxHealth = humanoid.MaxHealth,
-		DisplayedHealth = humanoid.Health,
-		DelayedHealth = humanoid.Health,
+		CurrentHealth = EnemyLib:GetHealth(enemy),
+		MaxHealth = EnemyLib:GetMaxHealth(enemy),
+		DisplayedHealth = EnemyLib:GetHealth(enemy),
+		DelayedHealth = EnemyLib:GetHealth(enemy),
 		LastDamageTime = 0,
 		IsVisible = true,
 		Connections = {},
 	}
 
-	-- Listen to health changes
-	local healthConn = humanoid.HealthChanged:Connect(function(newHealth)
-		local oldHealth = data.CurrentHealth
-		data.CurrentHealth = newHealth
+	-- Listen to health changes via attributes (humanoid-free enemies)
+	if enemy:GetAttribute("IsEnemy") then
+		local healthConn = enemy:GetAttributeChangedSignal("Health"):Connect(function()
+			local newHealth: number = (enemy:GetAttribute("Health") :: number?) or 0
+			local oldHealth = data.CurrentHealth
+			data.CurrentHealth = newHealth
+			data.MaxHealth = (enemy:GetAttribute("MaxHealth") :: number?) or data.MaxHealth
 
-		-- Immediately update fill bar for responsive feedback
-		local healthPercent = math.max(0, newHealth / data.MaxHealth)
-		data.FillBar.Size = UDim2.fromScale(healthPercent, 1)
-		data.FillBar.BackgroundColor3 = getHealthColor(healthPercent)
+			-- Immediately update fill bar for responsive feedback
+			local healthPercent = math.max(0, newHealth / data.MaxHealth)
+			data.FillBar.Size = UDim2.fromScale(healthPercent, 1)
+			data.FillBar.BackgroundColor3 = getHealthColor(healthPercent)
 
-		-- If took damage, trigger flash effects and reset delay timer
-		if newHealth < oldHealth then
-			data.LastDamageTime = os.clock()
-
-			-- Flash the enemy model (pass data, not enemy)
-			flashEnemyModel(data)
-
-			-- Flash the health bar
-			flashHealthBar(data.FillBar)
-		end
-
-		-- Immediate update for healing
-		if newHealth > oldHealth then
-			data.DelayedHealth = newHealth
-		end
-	end)
-	table.insert(data.Connections, healthConn)
-
-	-- Listen for enemy death
-	local diedConn = humanoid.Died:Connect(function()
-		-- Immediately show empty health bar
-		data.CurrentHealth = 0
-		data.FillBar.Size = UDim2.fromScale(0, 1)
-
-		-- Immediately hide highlight
-		if data.Highlight then
-			data.Highlight.FillTransparency = 1
-			data.Highlight.OutlineTransparency = 1
-			data.IsInRange = false
-			data.IsFlashing = false
-		end
-
-		-- Wait a moment to show the final hit, then fade out
-		task.delay(0.5, function()
-			if not data.Billboard or not data.Billboard.Parent then
-				return
+			-- If took damage, trigger flash effects and reset delay timer
+			if newHealth < oldHealth then
+				data.LastDamageTime = os.clock()
+				flashEnemyModel(data)
+				flashHealthBar(data.FillBar)
 			end
 
-			-- Fade out the damage bar too
-			local fadeOutDamage = TweenService:Create(
-				data.DamageBar,
-				TweenInfo.new(Config.FadeOutTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-				{ Size = UDim2.fromScale(0, 1) }
-			)
-			fadeOutDamage:Play()
+			-- Immediate update for healing
+			if newHealth > oldHealth then
+				data.DelayedHealth = newHealth
+			end
+		end)
+		table.insert(data.Connections, healthConn)
 
-			-- Fade out entire billboard
-			local fadeOut = TweenService:Create(
-				container,
-				TweenInfo.new(Config.FadeOutTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-				{ BackgroundTransparency = 1 }
-			)
-			fadeOut:Play()
+		-- Listen for enemy death via IsDead attribute
+		local diedConn = enemy:GetAttributeChangedSignal("IsDead"):Connect(function()
+			if enemy:GetAttribute("IsDead") then
+				-- Immediately show empty health bar
+				data.CurrentHealth = 0
+				data.FillBar.Size = UDim2.fromScale(0, 1)
 
-			task.delay(Config.FadeOutTime, function()
-				EnemyHealthBar:RemoveHealthBar(enemy)
+				-- Immediately hide highlight
+				if data.Highlight then
+					data.Highlight.FillTransparency = 1
+					data.Highlight.OutlineTransparency = 1
+					data.IsInRange = false
+					data.IsFlashing = false
+				end
+
+				-- Wait a moment to show the final hit, then fade out
+				task.delay(0.5, function()
+					if not data.Billboard or not data.Billboard.Parent then
+						return
+					end
+					local fadeOutDamage = TweenService:Create(
+						data.DamageBar,
+						TweenInfo.new(Config.FadeOutTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+						{ Size = UDim2.fromScale(0, 1) }
+					)
+					fadeOutDamage:Play()
+					local fadeOut = TweenService:Create(
+						container,
+						TweenInfo.new(Config.FadeOutTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+						{ BackgroundTransparency = 1 }
+					)
+					fadeOut:Play()
+					task.delay(Config.FadeOutTime, function()
+						EnemyHealthBar:RemoveHealthBar(enemy)
+					end)
+				end)
+			end
+		end)
+		table.insert(data.Connections, diedConn)
+	elseif humanoid then
+		-- Legacy Humanoid-based path (training dummies, etc)
+		local healthConn = humanoid.HealthChanged:Connect(function(newHealth)
+			local oldHealth = data.CurrentHealth
+			data.CurrentHealth = newHealth
+
+			local healthPercent = math.max(0, newHealth / data.MaxHealth)
+			data.FillBar.Size = UDim2.fromScale(healthPercent, 1)
+			data.FillBar.BackgroundColor3 = getHealthColor(healthPercent)
+
+			if newHealth < oldHealth then
+				data.LastDamageTime = os.clock()
+				flashEnemyModel(data)
+				flashHealthBar(data.FillBar)
+			end
+
+			if newHealth > oldHealth then
+				data.DelayedHealth = newHealth
+			end
+		end)
+		table.insert(data.Connections, healthConn)
+
+		local diedConn = humanoid.Died:Connect(function()
+			data.CurrentHealth = 0
+			data.FillBar.Size = UDim2.fromScale(0, 1)
+			if data.Highlight then
+				data.Highlight.FillTransparency = 1
+				data.Highlight.OutlineTransparency = 1
+				data.IsInRange = false
+				data.IsFlashing = false
+			end
+			task.delay(0.5, function()
+				if not data.Billboard or not data.Billboard.Parent then
+					return
+				end
+				local fadeOutDamage = TweenService:Create(
+					data.DamageBar,
+					TweenInfo.new(Config.FadeOutTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{ Size = UDim2.fromScale(0, 1) }
+				)
+				fadeOutDamage:Play()
+				local fadeOut = TweenService:Create(
+					container,
+					TweenInfo.new(Config.FadeOutTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{ BackgroundTransparency = 1 }
+				)
+				fadeOut:Play()
+				task.delay(Config.FadeOutTime, function()
+					EnemyHealthBar:RemoveHealthBar(enemy)
+				end)
 			end)
 		end)
-	end)
-	table.insert(data.Connections, diedConn)
+		table.insert(data.Connections, diedConn)
+	end
 
 	return data
 end
@@ -610,20 +663,20 @@ local function updateHealthBar(data: HealthBarData, deltaTime: number)
 		end
 	end
 
-	local humanoid = data.Humanoid
+	-- Try to re-acquire health data if humanoid became invalid
+	local currentHP = EnemyLib:GetHealth(data.Enemy)
+	local maxHP = EnemyLib:GetMaxHealth(data.Enemy)
 
-	-- Try to re-acquire humanoid if it became invalid
-	if not humanoid or not humanoid.Parent then
-		humanoid = data.Enemy:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			data.Humanoid = humanoid
-			data.MaxHealth = humanoid.MaxHealth
-			data.CurrentHealth = humanoid.Health
-		end
+	if maxHP > 0 then
+		data.CurrentHealth = currentHP
+		data.MaxHealth = maxHP
+	else
+		-- No valid health source found
+		return
 	end
 
-	-- Skip health bar updates if humanoid is dead/invalid (but visibility was already updated above)
-	if not humanoid or humanoid.Health <= 0 then
+	-- Skip health bar updates if dead
+	if currentHP <= 0 then
 		return
 	end
 
@@ -677,9 +730,10 @@ function EnemyHealthBar:CreateHealthBar(enemy: Model)
 		return
 	end
 
+	-- Support both attribute-based enemies and Humanoid-based entities
 	local humanoid = enemy:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
-		return
+	if not enemy:GetAttribute("IsEnemy") and not humanoid then
+		return -- Neither attribute-based nor Humanoid-based
 	end
 
 	local data = createHealthBar(enemy, humanoid)
@@ -777,22 +831,22 @@ function EnemyHealthBar:Init()
 		end)
 	end
 
-	-- ADDITIONAL: Watch for models with Humanoid being added to workspace
-	-- This catches enemies that spawn before the tag replicates to client
+	-- ADDITIONAL: Watch for models being added to workspace
+	-- This catches both Humanoid and attribute-based enemies
 	local function checkForEnemy(instance)
 		if not instance:IsA("Model") then
 			return
 		end
 
-		-- Wait a short moment for tags to replicate
+		-- Wait a short moment for tags/attributes to replicate
 		task.delay(0.1, function()
 			if not instance.Parent then
 				return -- Already removed
 			end
 
-			-- Check if it has a humanoid and matches enemy type names
-			local humanoid = instance:FindFirstChildOfClass("Humanoid")
-			if not humanoid then
+			-- Check for IsEnemy attribute (humanoid-free) or Humanoid
+			local hasIdentifier = instance:GetAttribute("IsEnemy") or instance:FindFirstChildOfClass("Humanoid")
+			if not hasIdentifier then
 				return
 			end
 
@@ -812,11 +866,14 @@ function EnemyHealthBar:Init()
 	-- Also scan workspace now for any models that might have been missed
 	task.defer(function()
 		for _, instance in workspace:GetDescendants() do
-			if instance:IsA("Model") and instance:FindFirstChildOfClass("Humanoid") then
-				local isEnemy = CollectionService:HasTag(instance, CombatConfig.Targeting.TargetTag)
-				local isDummy = CollectionService:HasTag(instance, "TrainingDummy")
-				if isEnemy or isDummy then
-					onPotentialEnemy(instance)
+			if instance:IsA("Model") then
+				local hasIdentifier = instance:GetAttribute("IsEnemy") or instance:FindFirstChildOfClass("Humanoid")
+				if hasIdentifier then
+					local isEnemy = CollectionService:HasTag(instance, CombatConfig.Targeting.TargetTag)
+					local isDummy = CollectionService:HasTag(instance, "TrainingDummy")
+					if isEnemy or isDummy then
+						onPotentialEnemy(instance)
+					end
 				end
 			end
 		end

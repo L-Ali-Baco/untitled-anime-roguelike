@@ -70,14 +70,21 @@ end
     Check if player is grounded using raycast (works for custom rigs too)
 ]]
 local function isGrounded(): boolean
-	local _, _, rootPart = getCharacterParts()
+	local _, humanoid, rootPart = getCharacterParts()
 	if not rootPart then
 		return false
 	end
 
-	-- Use raycast for grounded check (works for all rig types)
+	-- Calculate ray length dynamically based on character size + HipHeight
+	-- This ensures custom rigs with high HipHeight (e.g. BikerKing = 5.0) are detected correctly
+	local rayLength = 4 -- Default for standard characters
+	if humanoid then
+		-- Distance from rootPart center to floor = half root size + HipHeight + small margin
+		rayLength = (rootPart.Size.Y * 0.5) + humanoid.HipHeight + 1.5
+	end
+
 	local rayOrigin = rootPart.Position
-	local rayDirection = Vector3.new(0, -4, 0)
+	local rayDirection = Vector3.new(0, -rayLength, 0)
 
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterDescendantsInstances = { LocalPlayer.Character }
@@ -127,14 +134,21 @@ local function performGroundJump()
 	local isCustomRig = character:GetAttribute("IsCustomRig") == true
 
 	if isCustomRig then
-		-- Custom rig: Apply jump using direct physics
-		local currentVel = rootPart.AssemblyLinearVelocity
-		-- Cancel any downward velocity and apply upward force
-		rootPart.AssemblyLinearVelocity = Vector3.new(currentVel.X, 0, currentVel.Z)
+		-- Custom rig: Briefly zero HipHeight to kill the spring, set velocity, restore quickly.
+		-- The spring fights upward velocity on ground, so we disable it for ~0.1s while launching.
+		local savedHipHeight = humanoid.HipHeight
+		humanoid.HipHeight = 0
 
-		-- Apply upward impulse
-		local jumpImpulse = Vector3.new(0, JumpConfig.Force * rootPart.AssemblyMass, 0)
-		rootPart:ApplyImpulse(jumpImpulse)
+		local currentVel = rootPart.AssemblyLinearVelocity
+		rootPart.AssemblyLinearVelocity = Vector3.new(currentVel.X, JumpConfig.Force * 1.8, currentVel.Z)
+
+		-- Restore HipHeight after a few frames — character is already moving upward by then,
+		-- so the spring won't pull it back. Must restore before landing to prevent sinking.
+		task.delay(0.1, function()
+			if humanoid and humanoid.Parent then
+				humanoid.HipHeight = savedHipHeight
+			end
+		end)
 	else
 		-- Standard rig: Use Humanoid
 		humanoid.JumpPower = JumpConfig.Force
@@ -186,13 +200,21 @@ local function performAirJump()
 	airJumpsRemaining = airJumpsRemaining - 1
 
 	-- Cancel current vertical velocity and apply new jump force
-	-- We need to use AssemblyLinearVelocity to override existing velocity
 	local currentVel = rootPart.AssemblyLinearVelocity
-	rootPart.AssemblyLinearVelocity = Vector3.new(currentVel.X, 0, currentVel.Z)
 
-	-- Apply upward impulse
-	local jumpImpulse = Vector3.new(0, JumpConfig.AirJumpForce * rootPart.AssemblyMass, 0)
-	rootPart:ApplyImpulse(jumpImpulse)
+	-- Check if custom rig to handle HipHeight spring
+	local isCustomRig = character:GetAttribute("IsCustomRig") == true
+	if isCustomRig then
+		-- Air jump: DON'T touch HipHeight — the spring only fights near the ground,
+		-- and during an air jump we're already high up so it's irrelevant.
+		-- Just set velocity directly.
+		rootPart.AssemblyLinearVelocity = Vector3.new(currentVel.X, JumpConfig.AirJumpForce * 1.8, currentVel.Z)
+	else
+		-- Standard rig: impulse-based
+		rootPart.AssemblyLinearVelocity = Vector3.new(currentVel.X, 0, currentVel.Z)
+		local jumpImpulse = Vector3.new(0, JumpConfig.AirJumpForce * rootPart.AssemblyMass, 0)
+		rootPart:ApplyImpulse(jumpImpulse)
+	end
 
 	isJumping = true
 

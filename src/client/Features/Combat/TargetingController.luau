@@ -13,6 +13,7 @@ local Workspace = game:GetService("Workspace")
 
 local Signal = require(ReplicatedStorage.Packages.Signal)
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
+local EnemyLib = require(ReplicatedStorage.Shared.Lib.EnemyLib)
 
 local TargetingController = {}
 TargetingController.Name = "TargetingController"
@@ -48,8 +49,7 @@ local function getValidTargets(): { Model }
 	local tagged = CollectionService:GetTagged(TargetConfig.TargetTag)
 	for _, instance in tagged do
 		if instance:IsA("Model") then
-			local humanoid = instance:FindFirstChildOfClass("Humanoid")
-			if humanoid and humanoid.Health > 0 then
+			if EnemyLib:IsAlive(instance) then
 				table.insert(targets, instance)
 			end
 		end
@@ -59,8 +59,7 @@ local function getValidTargets(): { Model }
 	local dummies = CollectionService:GetTagged("TrainingDummy")
 	for _, instance in dummies do
 		if instance:IsA("Model") then
-			local humanoid = instance:FindFirstChildOfClass("Humanoid")
-			if humanoid and humanoid.Health > 0 then
+			if EnemyLib:IsAlive(instance) then
 				-- Avoid duplicates
 				local found = false
 				for _, t in targets do
@@ -81,8 +80,7 @@ local function getValidTargets(): { Model }
 		if child:IsA("Model") then
 			local name = child.Name
 			if name:find("Dummy") or name:find("Enemy") or name:find("Target") then
-				local humanoid = child:FindFirstChildOfClass("Humanoid")
-				if humanoid and humanoid.Health > 0 then
+				if EnemyLib:IsAlive(child) then
 					-- Avoid duplicates
 					local found = false
 					for _, t in targets do
@@ -364,8 +362,7 @@ local function onHeartbeat(deltaTime: number)
 
 	-- Check if current target is still valid
 	if currentTarget then
-		local humanoid = currentTarget:FindFirstChildOfClass("Humanoid")
-		if not humanoid or humanoid.Health <= 0 or not currentTarget.Parent then
+		if not EnemyLib:IsAlive(currentTarget) or not currentTarget.Parent then
 			local oldTarget = currentTarget
 			currentTarget = nil
 			TargetingController.OnTargetLost:Fire()

@@ -22,6 +22,7 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
 local ClassConfig = require(Shared:WaitForChild("Config"):WaitForChild("ClassConfig"))
 local StatLib = require(Shared:WaitForChild("Lib"):WaitForChild("StatLib"))
+local EnemyLib = require(Shared:WaitForChild("Lib"):WaitForChild("EnemyLib"))
 
 -- Services
 local ClassService = require(script.Parent.ClassService)
@@ -56,10 +57,10 @@ local function getTargetRoot(target: Model): BasePart?
 end
 
 --[[
-    Get the humanoid of a target
+    Check if target is alive (works for both enemies and Humanoid-based entities)
 ]]
-local function getTargetHumanoid(target: Model): Humanoid?
-	return target:FindFirstChildOfClass("Humanoid")
+local function isTargetAlive(target: Model): boolean
+	return EnemyLib:IsAlive(target)
 end
 
 --[[
@@ -155,7 +156,8 @@ local function validateAttack(
 				-- Must be sequential and within time window
 				if comboState.CurrentIndex ~= attackIndex - 1 then
 					-- Invalid sequence (e.g. skipped 1 to get to 2, or repeated 2)
-					return false, "Invalid combo sequence: Expected " .. (comboState.CurrentIndex + 1) .. ", got " .. attackIndex
+					return false,
+						"Invalid combo sequence: Expected " .. (comboState.CurrentIndex + 1) .. ", got " .. attackIndex
 				end
 
 				if timeSinceLastCombo > resetTime then
@@ -173,13 +175,8 @@ local function validateAttack(
 		return true, nil
 	end
 
-	-- Validate target exists and has humanoid
-	local targetHumanoid = getTargetHumanoid(targetModel)
-	if not targetHumanoid then
-		return false, "Target has no humanoid"
-	end
-
-	if targetHumanoid.Health <= 0 then
+	-- Validate target is alive
+	if not isTargetAlive(targetModel) then
 		return false, "Target already dead"
 	end
 
@@ -265,9 +262,8 @@ local function _applyDamage(
 	end
 	attackHitTargets[attackId][target] = true
 
-	-- Get target humanoid
-	local humanoid = getTargetHumanoid(target)
-	if not humanoid or humanoid.Health <= 0 then
+	-- Get target state
+	if not EnemyLib:IsAlive(target) then
 		return false, false
 	end
 
@@ -306,11 +302,12 @@ local function _applyDamage(
 	end
 
 	if damage > 0 then
-		humanoid:TakeDamage(damage)
+		EnemyLib:TakeDamage(target, damage)
 	end
 
 	if isRanged then
-		print("[CombatService] Dealt", damage, "ranged damage to", target.Name, "- HP:", humanoid.Health)
+		local currentHP = EnemyLib:GetHealth(target)
+		print("[CombatService] Dealt", damage, "ranged damage to", target.Name, "- HP:", currentHP)
 	end
 
 	-- Apply knockback
@@ -325,12 +322,12 @@ local function _applyDamage(
 	end
 
 	-- Check if target died
-	local targetDied = humanoid.Health <= 0
+	local targetDied = not EnemyLib:IsAlive(target)
 
 	if isRanged then
 		print(
 			"[CombatService] processRangedDamage: Target health after damage:",
-			humanoid.Health,
+			EnemyLib:GetHealth(target),
 			"died:",
 			targetDied
 		)
@@ -369,7 +366,7 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 	-- Normalize input to list of targets
 	local targets = {}
 	if typeof(targetOrTargets) == "Instance" then
-		targets = {targetOrTargets}
+		targets = { targetOrTargets }
 	elseif type(targetOrTargets) == "table" then
 		targets = targetOrTargets
 	end
@@ -379,7 +376,7 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 	-- We use targets[1] to validate distance/health for at least one target if present
 	local checkTarget = targets[1]
 	local isValid, errorReason = validateAttack(player, attackIndex, checkTarget, attackId)
-	
+
 	if not isValid then
 		-- Suppress "Attack too fast" warnings for rapid fire
 		if errorReason ~= "Attack too fast" then
@@ -394,7 +391,7 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 		local tValid, tError = validateAttack(player, attackIndex, target, attackId)
 		if tValid then
 			local didDamage, targetDied = processDamage(player, target, attackIndex, attackId)
-			
+
 			if didDamage then
 				-- Get attack data for VFX info
 				local attackData = CombatConfig.Attacks[attackIndex]
@@ -497,13 +494,8 @@ local function validateRangedAttack(player: Player, targetModel: Model?, hitPosi
 	-- removing this check allows shooting while moving backwards.
 	-- Anti-cheat is still enforced via distance check and rate limiting.
 
-	-- Validate target exists and has humanoid
-	local targetHumanoid = getTargetHumanoid(targetModel)
-	if not targetHumanoid then
-		return false, "Target has no humanoid"
-	end
-
-	if targetHumanoid.Health <= 0 then
+	-- Validate target is alive
+	if not isTargetAlive(targetModel) then
 		return false, "Target already dead"
 	end
 

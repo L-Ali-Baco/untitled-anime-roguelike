@@ -65,12 +65,25 @@ function CharacterLib:GetHumanoid(model: Model): Humanoid?
 end
 
 --[[
-    Check if a character is alive (has Humanoid with Health > 0)
+    Check if a character is alive.
+    Supports attribute-based enemies (IsEnemy + Health attribute)
+    and Humanoid-based characters (players).
     
     @param model The character Model
     @return boolean True if alive
 ]]
 function CharacterLib:IsAlive(model: Model): boolean
+	if not model or not model.Parent then
+		return false
+	end
+
+	-- Attribute-based enemies (no Humanoid)
+	if model:GetAttribute("IsEnemy") then
+		local health = model:GetAttribute("Health") or 0
+		return health > 0 and not model:GetAttribute("IsDead")
+	end
+
+	-- Humanoid-based (players)
 	local humanoid = CharacterLib:GetHumanoid(model)
 	return humanoid ~= nil and humanoid.Health > 0
 end

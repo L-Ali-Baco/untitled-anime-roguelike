@@ -151,12 +151,10 @@ local function tryEliteSpawn(difficulty: number, now: number, force: boolean?): 
 		-- Spawn a Brute as elite (tankier base type)
 		local enemy = EnemyService:SpawnEnemy("Brute", spawnPos)
 		if enemy then
-			-- Apply elite modifiers
-			local humanoid = enemy:FindFirstChildOfClass("Humanoid")
-			if humanoid then
-				humanoid.MaxHealth = humanoid.MaxHealth * config.HealthMultiplier
-				humanoid.Health = humanoid.MaxHealth
-			end
+			-- Apply elite modifiers (use attributes, no Humanoid)
+			local maxHP: number = (enemy:GetAttribute("MaxHealth") :: number?) or 100
+			enemy:SetAttribute("MaxHealth", math.floor(maxHP * config.HealthMultiplier))
+			enemy:SetAttribute("Health", enemy:GetAttribute("MaxHealth"))
 
 			-- Scale size
 			local rootPart = enemy:FindFirstChild("HumanoidRootPart")

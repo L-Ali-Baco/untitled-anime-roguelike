@@ -9,6 +9,7 @@ local CollectionService = game:GetService("CollectionService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
 local StatLib = require(Shared:WaitForChild("Lib"):WaitForChild("StatLib"))
+local EnemyLib = require(Shared:WaitForChild("Lib"):WaitForChild("EnemyLib"))
 
 local VanguardSkills = {}
 
@@ -30,8 +31,7 @@ local function getEnemiesInRadius(position: Vector3, radius: number): { Model }
 				CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag)
 				or CollectionService:HasTag(model, "TrainingDummy")
 			then
-				local hum = model:FindFirstChildOfClass("Humanoid")
-				if hum and hum.Health > 0 then
+				if EnemyLib:IsAlive(model) then
 					table.insert(enemies, model)
 				end
 			end
@@ -108,13 +108,12 @@ function VanguardSkills.SeismicSlam(player: Player, skillData: any)
 	print("[VanguardSkills] Seismic Slam found", #enemies, "enemies")
 
 	for _, enemy in enemies do
-		local hum = enemy:FindFirstChildOfClass("Humanoid")
-		local enemyRoot = enemy:FindFirstChild("HumanoidRootPart")
+		local enemyRoot = enemy:FindFirstChild("HumanoidRootPart") or enemy.PrimaryPart
 
-		if hum and enemyRoot then
+		if EnemyLib:IsAlive(enemy) and enemyRoot then
 			print(" - Hitting", enemy.Name, "for", totalDamage)
 			-- Deal Damage
-			hum:TakeDamage(totalDamage)
+			EnemyLib:TakeDamage(enemy, totalDamage)
 
 			-- Apply Knockup (Direct Velocity)
 			local velocity = Vector3.new(0, knockupForce, 0)
@@ -180,11 +179,10 @@ function VanguardSkills.BladeStorm(player: Player, skillData: any)
 				local angle = math.acos(math.clamp(forward:Dot(dir), -1, 1))
 
 				if angle < math.rad(80) then -- Increased Cone (was 60, now 80 degrees - very wide)
-					local hum = enemy:FindFirstChildOfClass("Humanoid")
-					if hum then
-						hum:TakeDamage(damagePerHit)
+					if EnemyLib:IsAlive(enemy) then
+						EnemyLib:TakeDamage(enemy, damagePerHit)
 						-- Small knockback
-						local enemyRoot = enemy:FindFirstChild("HumanoidRootPart")
+						local enemyRoot = enemy:FindFirstChild("HumanoidRootPart") or enemy.PrimaryPart
 						if enemyRoot then
 							enemyRoot.AssemblyLinearVelocity = dir * 15 + Vector3.new(0, 5, 0)
 						end

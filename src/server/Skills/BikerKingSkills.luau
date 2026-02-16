@@ -10,6 +10,7 @@ local CollectionService = game:GetService("CollectionService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
 local StatLib = require(Shared:WaitForChild("Lib"):WaitForChild("StatLib"))
+local EnemyLib = require(Shared:WaitForChild("Lib"):WaitForChild("EnemyLib"))
 
 local BikerKingSkills = {}
 
@@ -31,8 +32,7 @@ local function getEnemiesInRadius(position: Vector3, radius: number): { Model }
 				CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag)
 				or CollectionService:HasTag(model, "TrainingDummy")
 			then
-				local hum = model:FindFirstChildOfClass("Humanoid")
-				if hum and hum.Health > 0 then
+				if EnemyLib:IsAlive(model) then
 					table.insert(enemies, model)
 				end
 			end
@@ -50,8 +50,7 @@ local function applyBurn(
 	burnDuration: number,
 	tickRate: number
 )
-	local hum = enemy:FindFirstChildOfClass("Humanoid")
-	if not hum or hum.Health <= 0 then
+	if not EnemyLib:IsAlive(enemy) then
 		return
 	end
 
@@ -71,11 +70,10 @@ local function applyBurn(
 			if not enemy or not enemy.Parent then
 				break
 			end
-			local h = enemy:FindFirstChildOfClass("Humanoid")
-			if not h or h.Health <= 0 then
+			if not EnemyLib:IsAlive(enemy) then
 				break
 			end
-			h:TakeDamage(burnDamagePerTick)
+			EnemyLib:TakeDamage(enemy, burnDamagePerTick)
 		end
 		if enemy and enemy.Parent then
 			enemy:SetAttribute(burnTag, nil)
@@ -186,9 +184,8 @@ function BikerKingSkills.FlameCircle(player: Player, skillData: any)
 			print("[BikerKingSkills] Flame Circle tick", i, "- found", #enemies, "enemies")
 
 			for _, enemy in enemies do
-				local hum = enemy:FindFirstChildOfClass("Humanoid")
-				if hum and hum.Health > 0 then
-					hum:TakeDamage(damagePerTick)
+				if EnemyLib:IsAlive(enemy) then
+					EnemyLib:TakeDamage(enemy, damagePerTick)
 				end
 			end
 
@@ -276,11 +273,10 @@ function BikerKingSkills.MeteorStomp(player: Player, skillData: any)
 					)
 
 					for _, enemy in enemies do
-						local hum = enemy:FindFirstChildOfClass("Humanoid")
-						local enemyRoot = enemy:FindFirstChild("HumanoidRootPart")
+						local enemyRoot = enemy:FindFirstChild("HumanoidRootPart") or enemy.PrimaryPart
 
-						if hum and hum.Health > 0 then
-							hum:TakeDamage(stompDamage)
+						if EnemyLib:IsAlive(enemy) then
+							EnemyLib:TakeDamage(enemy, stompDamage)
 							hitEnemy = true
 
 							-- Slam enemies downward/outward

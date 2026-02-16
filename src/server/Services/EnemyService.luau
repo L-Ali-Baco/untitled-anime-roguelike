@@ -3,18 +3,19 @@
     Server-side enemy management and AI.
     
     Responsibilities:
-    - Spawn and despawn enemies
+    - Spawn and despawn enemies (NO HUMANOID — attribute-based health)
     - Run AI state machine (Idle, Chase, Attack)
     - Handle enemy attacks on players
     - Track active enemies
-    - PathfindingService integration
+    - LinearVelocity-based movement
+    - AnimationController for rigged models
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
-local PathfindingService = game:GetService("PathfindingService")
+local _PathfindingService = game:GetService("PathfindingService")
 
 -- Wait for shared modules
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -22,6 +23,7 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local EnemyConfig = require(Shared:WaitForChild("Config"):WaitForChild("EnemyConfig"))
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
 local MovementConfig = require(Shared:WaitForChild("Config"):WaitForChild("MovementConfig"))
+local EnemyLib = require(Shared:WaitForChild("Lib"):WaitForChild("EnemyLib"))
 
 local EnemyService = {
 	Name = "EnemyService",
@@ -49,8 +51,10 @@ local playerLastDash: { [Player]: number } = {}
 -- Type definition for enemy data
 type EnemyData = {
 	Model: Model,
-	Humanoid: Humanoid,
 	RootPart: BasePart,
+	LinearVelocity: LinearVelocity?, -- Movement constraint
+	AlignOrientation: AlignOrientation?, -- Facing constraint
+	Animator: Animator?, -- For rigged models
 	EnemyType: string,
 	Config: any,
 	State: string,
@@ -63,7 +67,9 @@ type EnemyData = {
 	HitstunEndTime: number,
 	AggroTime: number, -- When we first saw target
 	IsMoving: boolean, -- Track if currently moving (for hysteresis)
-	LastMoveTarget: Vector3?, -- Last position we told MoveTo to go to
+	LastMoveTarget: Vector3?, -- Last position we told LinearVelocity to go to
+	LastPos: Vector3?, -- For unstuck detection
+	LastPosTime: number?, -- For unstuck detection
 	AttackTriggered: boolean, -- Whether attack was triggered this attack state
 }
 
@@ -225,7 +231,9 @@ local function moveTowardTarget(enemyData: EnemyData)
 	-- Already close enough - stop moving
 	if distanceToTarget <= stopDistance then
 		if enemyData.IsMoving then
-			enemyData.Humanoid:MoveTo(currentPos)
+			if enemyData.LinearVelocity then
+				enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+			end
 			enemyData.IsMoving = false
 			enemyData.LastMoveTarget = nil
 		end
@@ -256,9 +264,8 @@ local function moveTowardTarget(enemyData: EnemyData)
 		elseif tick() - enemyData.LastPosTime > 1.0 then
 			local distMoved = (currentPos - enemyData.LastPos).Magnitude
 			if distMoved < 1.0 then
-				-- We are stuck! Try jumping
-				enemyData.Humanoid.Jump = true
-				-- Try moving slightly to the side next update
+				-- We are stuck! Apply upward impulse instead of Humanoid.Jump
+				enemyData.RootPart.AssemblyLinearVelocity = Vector3.new(0, 30, 0)
 				needsNewMove = true
 			end
 			enemyData.LastPos = currentPos
@@ -266,9 +273,15 @@ local function moveTowardTarget(enemyData: EnemyData)
 		end
 	end
 
-	-- Only call MoveTo if we need to update destination
-	if needsNewMove then
-		enemyData.Humanoid:MoveTo(targetPos)
+	-- Set LinearVelocity to move toward target
+	if needsNewMove and enemyData.LinearVelocity then
+		local direction = (targetPos - currentPos)
+		direction = Vector3.new(direction.X, 0, direction.Z) -- Horizontal only
+		if direction.Magnitude > 0.1 then
+			local speed: number = (enemyData.Model:GetAttribute("WalkSpeed") :: number?) or 14
+			local dir2D = direction.Unit
+			enemyData.LinearVelocity.PlaneVelocity = Vector2.new(dir2D.X, dir2D.Z) * speed
+		end
 		enemyData.IsMoving = true
 		enemyData.LastMoveTarget = targetPos
 	end
@@ -294,9 +307,21 @@ local function faceTarget(enemyData: EnemyData)
 		return
 	end
 
-	-- Smoothly rotate toward target
+	-- Use AlignOrientation to smoothly rotate toward target (prevents direct CFrame conflicts)
 	local targetCFrame = CFrame.lookAt(enemyData.RootPart.Position, enemyData.RootPart.Position + direction)
-	enemyData.RootPart.CFrame = enemyData.RootPart.CFrame:Lerp(targetCFrame, 0.2)
+	if enemyData.AlignOrientation then
+		enemyData.AlignOrientation.CFrame = targetCFrame
+	else
+		-- Fallback: find AlignOrientation on root part
+		local align = enemyData.RootPart:FindFirstChild("EnemyAlignOrientation")
+		if align then
+			(align :: AlignOrientation).CFrame = targetCFrame
+			enemyData.AlignOrientation = align :: AlignOrientation
+		else
+			-- Last resort: direct CFrame
+			enemyData.RootPart.CFrame = enemyData.RootPart.CFrame:Lerp(targetCFrame, 0.2)
+		end
+	end
 end
 
 --[[
@@ -410,7 +435,7 @@ local function updateEnemyAI(enemyData: EnemyData, deltaTime: number)
 	local oldState = enemyData.State
 
 	-- Skip if dead
-	if enemyData.Humanoid.Health <= 0 then
+	if not EnemyLib:IsAlive(enemyData.Model) then
 		if enemyData.State ~= AIState.Dead then
 			enemyData.State = AIState.Dead
 			local stateRemote = Remotes:GetEvent("EnemyStateChanged")
@@ -449,7 +474,9 @@ local function updateEnemyAI(enemyData: EnemyData, deltaTime: number)
 			enemyData.State = AIState.Idle
 			enemyData.IsMoving = false
 			enemyData.LastMoveTarget = nil
-			enemyData.Humanoid:MoveTo(enemyData.RootPart.Position) -- Stop moving
+			if enemyData.LinearVelocity then
+				enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+			end
 			return
 		end
 
@@ -468,11 +495,15 @@ local function updateEnemyAI(enemyData: EnemyData, deltaTime: number)
 					-- Stop movement when attacking
 					enemyData.IsMoving = false
 					enemyData.LastMoveTarget = nil
-					enemyData.Humanoid:MoveTo(enemyData.RootPart.Position)
+					if enemyData.LinearVelocity then
+						enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+					end
 				end
 			else
 				-- Move toward target
 				moveTowardTarget(enemyData)
+				-- Face the target while chasing
+				faceTarget(enemyData)
 			end
 		end
 	elseif enemyData.State == AIState.Attack then
@@ -534,14 +565,14 @@ function EnemyService:ApplyHitstun(enemyModel: Model, duration: number?)
 		enemyData.State = AIState.Hitstun
 		enemyData.HitstunEndTime = tick() + hitstunDuration
 
-		-- Reset movement state (stops MoveTo from being called)
+		-- Reset movement state (stops LinearVelocity from being set)
 		enemyData.IsMoving = false
 		enemyData.LastMoveTarget = nil
 
-		-- Stop the Humanoid from moving on its own
-		-- MoveTo to current position stops pathfinding without affecting velocity
-		local currentPos = enemyData.RootPart.Position
-		enemyData.Humanoid:MoveTo(currentPos)
+		-- Stop LinearVelocity-driven movement
+		if enemyData.LinearVelocity then
+			enemyData.LinearVelocity.VectorVelocity = Vector3.zero
+		end
 
 		-- IMPORTANT: Delay velocity zeroing to allow knockback to play out
 		-- Knockback was already applied by CombatService before this function
@@ -574,14 +605,9 @@ end
     Register an existing enemy model (for manually placed enemies)
 ]]
 function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
-	-- Validate model
-	local humanoid = enemyModel:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
-		warn("[EnemyService] Cannot register enemy without Humanoid:", enemyModel.Name)
-		return
-	end
-
+	-- Validate model has a root part
 	local rootPart = enemyModel:FindFirstChild("HumanoidRootPart")
+		or enemyModel:FindFirstChild("Root")
 		or enemyModel:FindFirstChild("Torso")
 		or enemyModel.PrimaryPart
 	if not rootPart then
@@ -617,9 +643,8 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 	local scaledSpeed = config.WalkSpeed * speedMultiplier
 	local scaledDamage = config.Damage * damageMultiplier
 
-	humanoid.MaxHealth = scaledHealth
-	humanoid.Health = scaledHealth
-	humanoid.WalkSpeed = scaledSpeed
+	-- Setup attributes (replaces Humanoid.MaxHealth/Health/WalkSpeed)
+	EnemyLib:SetupAttributes(enemyModel, scaledHealth, scaledHealth, scaledSpeed)
 
 	-- Store scaled damage in config copy for this enemy
 	local scaledConfig = {}
@@ -637,7 +662,6 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 	CollectionService:AddTag(enemyModel, CombatConfig.Targeting.TargetTag)
 
 	-- Set network owner to server (nil) for authoritative physics
-	-- This prevents client-side physics interference and teleportation issues
 	if rootPart:IsA("BasePart") then
 		rootPart:SetNetworkOwner(nil)
 	end
@@ -649,13 +673,71 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 		end
 	end
 
-	-- Create enemy data (use scaledConfig for proper damage values)
+	-- Setup LinearVelocity for movement (replaces Humanoid:MoveTo)
+	local attachment = rootPart:FindFirstChild("RootAttachment")
+	if not attachment then
+		attachment = Instance.new("Attachment")
+		attachment.Name = "RootAttachment"
+		attachment.Parent = rootPart
+	end
+
+	local linearVelocity = Instance.new("LinearVelocity")
+	linearVelocity.Name = "EnemyMoveVelocity"
+	linearVelocity.Attachment0 = attachment
+	linearVelocity.MaxForce = 50000 -- Enough force to move the enemy reliably
+	linearVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
+	-- Use Plane mode: only constrain XZ velocity, let gravity handle Y naturally
+	linearVelocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
+	linearVelocity.PrimaryTangentAxis = Vector3.new(1, 0, 0) -- X axis
+	linearVelocity.SecondaryTangentAxis = Vector3.new(0, 0, 1) -- Z axis
+	linearVelocity.PlaneVelocity = Vector2.zero
+	linearVelocity.Parent = rootPart
+
+	-- Add AlignOrientation to keep enemy upright (prevents pendulum swinging)
+	-- This replaces the stabilization that Humanoid normally provides
+	local alignAttachment = Instance.new("Attachment")
+	alignAttachment.Name = "AlignAttachment"
+	alignAttachment.Parent = rootPart
+
+	local alignOrientation = Instance.new("AlignOrientation")
+	alignOrientation.Name = "EnemyAlignOrientation"
+	alignOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	alignOrientation.Attachment0 = alignAttachment
+	alignOrientation.CFrame = rootPart.CFrame -- Initial orientation
+	alignOrientation.MaxTorque = 100000 -- Strong enough to stay upright
+	alignOrientation.MaxAngularVelocity = 20
+	alignOrientation.Responsiveness = 40 -- Snappy response
+	alignOrientation.RigidityEnabled = false
+	alignOrientation.Parent = rootPart
+
+	-- Setup AnimationController + Animator (replaces Humanoid for animations)
+	local animController = enemyModel:FindFirstChildOfClass("AnimationController")
+	local animator: Animator? = nil
+	if not animController then
+		animController = Instance.new("AnimationController")
+		animController.Parent = enemyModel
+	end
+	animator = animController:FindFirstChildOfClass("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = animController
+	end
+
+	-- Remove any leftover Humanoid (safety for pre-existing models)
+	local existingHumanoid = enemyModel:FindFirstChildOfClass("Humanoid")
+	if existingHumanoid then
+		existingHumanoid:Destroy()
+	end
+
+	-- Create enemy data
 	local enemyData: EnemyData = {
 		Model = enemyModel,
-		Humanoid = humanoid,
 		RootPart = rootPart,
+		LinearVelocity = linearVelocity,
+		AlignOrientation = alignOrientation, -- Keep enemy upright + drive rotation
+		Animator = animator,
 		EnemyType = typeKey,
-		Config = scaledConfig, -- Use scaled config with difficulty-adjusted damage
+		Config = scaledConfig,
 		State = AIState.Idle,
 		Target = nil,
 		LastAttackTime = 0,
@@ -672,16 +754,25 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 
 	activeEnemies[enemyModel] = enemyData
 
-	-- Handle death
-	humanoid.Died:Connect(function()
+	-- Handle death via IsDead attribute (replaces Humanoid.Died)
+	enemyModel:GetAttributeChangedSignal("IsDead"):Connect(function()
+		if not enemyModel:GetAttribute("IsDead") then
+			return
+		end
+
 		enemyData.State = AIState.Dead
+
+		-- Stop movement
+		if enemyData.LinearVelocity then
+			enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+		end
 
 		-- Fire death event
 		local enemyDiedRemote = Remotes:GetEvent("EnemyDied")
 		if enemyDiedRemote then
 			enemyDiedRemote:FireAllClients({
 				Target = enemyModel,
-				Killer = enemyData.Target, -- Last player who hit
+				Killer = enemyData.Target,
 				Position = rootPart.Position,
 			})
 		end
@@ -689,24 +780,22 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 		-- Immediately disable physics interactions that block shots
 		for _, part in enemyModel:GetDescendants() do
 			if part:IsA("BasePart") then
-				part.CanQuery = false -- Don't block raycasts
-				part.CanTouch = false -- Don't trigger touches
-				part.CollisionGroup = "Debris" -- Optional: Move to debris group if it exists
+				part.CanQuery = false
+				part.CanTouch = false
+				part.CollisionGroup = "Debris"
 			end
 		end
 
-		-- Cleanup after ragdoll
+		-- Cleanup after death animation
 		task.delay(EnemyConfig.Death.RagdollDuration, function()
 			activeEnemies[enemyModel] = nil
 
-			-- Fade out and destroy
 			for _, part in enemyModel:GetDescendants() do
 				if part:IsA("BasePart") then
 					part.CanCollide = false
 				end
 			end
 
-			-- Destroy model
 			task.delay(EnemyConfig.Death.FadeOutDuration, function()
 				if enemyModel and enemyModel.Parent then
 					enemyModel:Destroy()
@@ -715,14 +804,17 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 		end)
 	end)
 
-	-- Apply hitstun when damaged
-	humanoid.HealthChanged:Connect(function(newHealth)
-		if newHealth < humanoid.MaxHealth then
+	-- Apply hitstun when Health attribute changes (replaces Humanoid.HealthChanged)
+	local lastHealth = scaledHealth
+	enemyModel:GetAttributeChangedSignal("Health"):Connect(function()
+		local newHealth: number = (enemyModel:GetAttribute("Health") :: number?) or 0
+		if newHealth < lastHealth then
 			EnemyService:ApplyHitstun(enemyModel)
 		end
+		lastHealth = newHealth
 	end)
 
-	print("[EnemyService] Registered enemy:", enemyModel.Name, "Type:", typeKey)
+	print("[EnemyService] Registered enemy:", enemyModel.Name, "Type:", typeKey, "(Humanoid-free)")
 	return enemyData
 end
 
@@ -746,14 +838,10 @@ function EnemyService:SpawnEnemy(enemyType: string, position: Vector3, parent: I
 		return nil
 	end
 
-	-- Create basic humanoid model
+	-- Create basic model (NO HUMANOID)
 	-- In production, you'd clone from a prefab in ReplicatedStorage
 	local enemyModel = Instance.new("Model")
 	enemyModel.Name = enemyType
-
-	-- Create humanoid
-	local humanoid = Instance.new("Humanoid")
-	humanoid.Parent = enemyModel
 
 	-- Create basic parts (placeholder - replace with actual model)
 	local torso = Instance.new("Part")
@@ -794,7 +882,7 @@ function EnemyService:SpawnEnemy(enemyType: string, position: Vector3, parent: I
 	enemyModel.PrimaryPart = torso
 	enemyModel.Parent = parent or workspace
 
-	-- Register the enemy
+	-- Register the enemy (sets up attributes, LinearVelocity, AnimationController)
 	self:RegisterEnemy(enemyModel, enemyType)
 
 	return enemyModel
@@ -835,10 +923,10 @@ function EnemyService:Start()
 	print("[EnemyService] Starting...")
 
 	-- Register existing enemies in workspace
-	-- Look for models tagged with "Enemy" that aren't TrainingDummy
+	-- Look for models tagged with "Enemy" or matching enemy type names
 	for _, obj in workspace:GetDescendants() do
-		if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") then
-			-- Check if it's tagged as an enemy type
+		if obj:IsA("Model") then
+			-- Check if it's tagged as an enemy type or has IsEnemy attribute
 			for typeName in EnemyConfig.Types do
 				if obj.Name == typeName or CollectionService:HasTag(obj, typeName) then
 					self:RegisterEnemy(obj, typeName)
