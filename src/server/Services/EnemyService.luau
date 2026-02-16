@@ -459,7 +459,7 @@ local function performLeapAttack(enemyData: EnemyData)
 	faceTarget(enemyData)
 
 	-- ================================================================
-	-- PHASE 1: WIND-UP (kneel/crouch on the ground)
+	-- PHASE 1: WIND-UP (crouch/anticipation)
 	-- ================================================================
 	local windupTrack = nil
 	if attackData.WindupAnimId and enemyData.Animator then
@@ -469,11 +469,11 @@ local function performLeapAttack(enemyData: EnemyData)
 			windupTrack = enemyData.Animator:LoadAnimation(anim)
 			windupTrack.Priority = Enum.AnimationPriority.Action4
 			windupTrack:Play()
-			windupTrack:AdjustSpeed(attackData.WindupAnimSpeed or 0.4)
+			windupTrack:AdjustSpeed(attackData.WindupAnimSpeed or 1.0)
 		end)
 	end
 
-	-- Fire wind-up VFX event (dust swirling inward)
+	-- Fire wind-up VFX event
 	local enemyAttackRemote = Remotes:GetEvent("EnemyAttack")
 	if enemyAttackRemote then
 		enemyAttackRemote:FireAllClients({
@@ -485,21 +485,33 @@ local function performLeapAttack(enemyData: EnemyData)
 		})
 	end
 
-	-- Wait for wind-up to complete (kneeling on ground)
+	-- Wait for wind-up to complete
 	task.wait(windupDuration)
 
 	-- Validate still alive
 	if not rootPart or not rootPart.Parent or enemyData.State == AIState.Dead then
-		if windupTrack then
-			windupTrack:Stop()
-		end
+		if windupTrack then windupTrack:Stop() end
 		return
 	end
 
 	-- ================================================================
 	-- PHASE 2: LAUNCH UP (rise straight up to peak height)
-	-- Wind-up anim continues playing during the rise (natural transition)
+	-- Start mid-air loop immediately as we launch
 	-- ================================================================
+	if windupTrack then windupTrack:Stop(0.1) end
+
+	local midairTrack = nil
+	if attackData.MidairAnimId and enemyData.Animator then
+		pcall(function()
+			local anim = Instance.new("Animation")
+			anim.AnimationId = attackData.MidairAnimId
+			midairTrack = enemyData.Animator:LoadAnimation(anim)
+			midairTrack.Priority = Enum.AnimationPriority.Action4
+			midairTrack.Looped = true
+			midairTrack:Play()
+		end)
+	end
+
 	local startPos = rootPart.Position
 	local baseY = startPos.Y
 
@@ -510,19 +522,12 @@ local function performLeapAttack(enemyData: EnemyData)
 		enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
 	end
 
-	-- Speed up wind-up anim slightly during launch (looks like powering up)
-	if windupTrack then
-		windupTrack:AdjustSpeed(0.8)
-	end
-
-	-- Rise straight up with eased motion (fast start, slow at peak)
+	-- Rise straight up
 	local launchStart = tick()
 	while true do
 		local elapsed = tick() - launchStart
 		local t = math.clamp(elapsed / launchDuration, 0, 1)
-		if t >= 1 then
-			break
-		end
+		if t >= 1 then break end
 
 		-- Ease-out: fast at start, slows near peak
 		local easedT = 1 - (1 - t) * (1 - t)
@@ -546,9 +551,7 @@ local function performLeapAttack(enemyData: EnemyData)
 
 	-- Validate still alive
 	if not rootPart or not rootPart.Parent or enemyData.State == AIState.Dead then
-		if windupTrack then
-			windupTrack:Stop()
-		end
+		if midairTrack then midairTrack:Stop() end
 		rootPart.Anchored = wasAnchored
 		return
 	end
@@ -559,34 +562,14 @@ local function performLeapAttack(enemyData: EnemyData)
 	-- Get target's current position for landing
 	local targetPos = getTargetPosition(target)
 	if not targetPos then
-		if windupTrack then
-			windupTrack:Stop()
-		end
+		if midairTrack then midairTrack:Stop() end
 		rootPart.Anchored = wasAnchored
 		enemyData.State = AIState.Chase
 		return
 	end
 
-	-- Stop wind-up, start mid-air loop
-	if windupTrack then
-		windupTrack:Stop(0.15)
-	end
-
-	local midairTrack = nil
-	if attackData.MidairAnimId and enemyData.Animator then
-		pcall(function()
-			local anim = Instance.new("Animation")
-			anim.AnimationId = attackData.MidairAnimId
-			midairTrack = enemyData.Animator:LoadAnimation(anim)
-			midairTrack.Priority = Enum.AnimationPriority.Action4
-			midairTrack.Looped = true
-			midairTrack:Play()
-		end)
-	end
-
 	local flightStartPos = rootPart.Position -- At peak height
 	local landingPos = targetPos -- Target's ground position
-
 	-- Fly from peak height down toward landing position
 	local flightStart = tick()
 	while true do

@@ -107,11 +107,11 @@ return {
 				{
 					Name = "LeapSlam",
 					Type = "Leap", -- Flag for special multi-phase handling
-					WindupAnimId = "rbxassetid://135955258792126",
+					WindupAnimId = "rbxassetid://95055599600378",
 					MidairAnimId = "rbxassetid://126352869640651",
 					LandAnimId = "rbxassetid://119288108301982",
-					WindupDuration = 1.2, -- Slow, dramatic crouch
-					WindupAnimSpeed = 0.4, -- Very slow animation at start
+					WindupDuration = 0.23, -- Short, fast anticipation
+					WindupAnimSpeed = 1.0, -- Normal speed for this clip
 					LaunchDuration = 0.5, -- Rise straight up to peak
 					FlightDuration = 0.6, -- Horizontal flight toward target
 					FlightHeight = 40, -- Studs above ground at peak (big dramatic jump)
