@@ -9,6 +9,7 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 
@@ -24,6 +25,9 @@ local ScreenShakeController = nil
 
 -- Connections
 local connections: { RBXScriptConnection } = {}
+
+-- Track player health for damage numbers on actual hits
+local lastPlayerHealth: number? = nil
 
 -- Hitstun cooldown tracking to prevent double-application
 -- Key: enemy Model, Value: last hitstun time
@@ -65,40 +69,544 @@ local function createAttackIndicator(enemyModel: Model, targetPosition: Vector3)
 end
 
 --[[
+    Create a ground slam effect
+    Layered: Impact flash → Ground crack → Shockwave ring → Rock debris → Dust cloud
+]]
+local function playSlamEffect(position: Vector3, damage: number)
+	local slamRadius = 18 -- Visual radius in studs
+
+	-- Client-side raycast to find the actual ground (exclude enemies + characters)
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	local excludeList = CollectionService:GetTagged("Enemy")
+	-- Also exclude player characters
+	for _, player in game:GetService("Players"):GetPlayers() do
+		if player.Character then
+			table.insert(excludeList, player.Character)
+		end
+	end
+	rayParams.FilterDescendantsInstances = excludeList
+
+	local rayOrigin = position + Vector3.new(0, 10, 0)
+	local rayResult = workspace:Raycast(rayOrigin, Vector3.new(0, -30, 0), rayParams)
+	local groundPos = if rayResult then rayResult.Position + Vector3.new(0, 0.05, 0) else position
+
+	-- === 1. IMPACT FLASH (hemisphere on the ground) ===
+	local flash = Instance.new("Part")
+	flash.Name = "SlamFlash"
+	flash.Anchored = true
+	flash.CanCollide = false
+	flash.CanQuery = false
+	flash.CanTouch = false
+	flash.CastShadow = false
+	flash.Shape = Enum.PartType.Ball
+	flash.Material = Enum.Material.Neon
+	flash.Color = Color3.fromRGB(255, 180, 80)
+	flash.Transparency = 0.1
+	flash.Size = Vector3.new(4, 4, 4)
+	flash.Position = groundPos
+	flash.Parent = workspace
+
+	TweenService:Create(flash, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = Vector3.new(10, 6, 10), -- Wider than tall to hug the ground
+		Transparency = 1,
+	}):Play()
+	Debris:AddItem(flash, 0.2)
+
+	-- === 2. GROUND CRACK (dark flat disc flush with floor) ===
+	local crack = Instance.new("Part")
+	crack.Name = "SlamCrack"
+	crack.Anchored = true
+	crack.CanCollide = false
+	crack.CanQuery = false
+	crack.CanTouch = false
+	crack.CastShadow = false
+	crack.Shape = Enum.PartType.Cylinder
+	crack.Material = Enum.Material.Slate
+	crack.Color = Color3.fromRGB(30, 25, 20)
+	crack.Transparency = 0.3
+	crack.Size = Vector3.new(0.15, 1, 1)
+	crack.CFrame = CFrame.new(groundPos) * CFrame.Angles(0, 0, math.rad(90))
+	crack.Parent = workspace
+
+	TweenService:Create(crack, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = Vector3.new(0.15, slamRadius * 1.2, slamRadius * 1.2),
+	}):Play()
+
+	task.delay(0.8, function()
+		if crack.Parent then
+			TweenService:Create(crack, TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+				Transparency = 1,
+			}):Play()
+			Debris:AddItem(crack, 1.1)
+		end
+	end)
+
+	-- === 3. SHOCKWAVE RING (flush with ground) ===
+	local ring = Instance.new("Part")
+	ring.Name = "SlamRing"
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanQuery = false
+	ring.CanTouch = false
+	ring.CastShadow = false
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Material = Enum.Material.Neon
+	ring.Color = Color3.fromRGB(255, 120, 40)
+	ring.Transparency = 0
+	ring.Size = Vector3.new(1.5, 3, 3)
+	ring.CFrame = CFrame.new(groundPos + Vector3.new(0, 0.2, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Parent = workspace
+
+	TweenService:Create(ring, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = Vector3.new(1.5, slamRadius * 2, slamRadius * 2),
+		Transparency = 1,
+	}):Play()
+	Debris:AddItem(ring, 0.4)
+
+	-- Second ring (delayed, slightly different color)
+	task.delay(0.05, function()
+		local ring2 = Instance.new("Part")
+		ring2.Name = "SlamRing2"
+		ring2.Anchored = true
+		ring2.CanCollide = false
+		ring2.CanQuery = false
+		ring2.CanTouch = false
+		ring2.CastShadow = false
+		ring2.Shape = Enum.PartType.Cylinder
+		ring2.Material = Enum.Material.Neon
+		ring2.Color = Color3.fromRGB(255, 200, 100)
+		ring2.Transparency = 0.3
+		ring2.Size = Vector3.new(1, 2, 2)
+		ring2.CFrame = CFrame.new(groundPos + Vector3.new(0, 0.1, 0)) * CFrame.Angles(0, 0, math.rad(90))
+		ring2.Parent = workspace
+
+		TweenService:Create(ring2, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Size = Vector3.new(1, slamRadius * 1.6, slamRadius * 1.6),
+			Transparency = 1,
+		}):Play()
+		Debris:AddItem(ring2, 0.45)
+	end)
+
+	-- === 4. ROCK DEBRIS (erupt from ground at impact point) ===
+	for _ = 1, 8 do
+		local rockSize = math.random(15, 35) / 10
+		local rock = Instance.new("Part")
+		rock.Size = Vector3.new(rockSize, rockSize * 0.7, rockSize)
+		rock.Anchored = false
+		rock.CanCollide = true
+		rock.CanQuery = false
+		rock.CanTouch = false
+		rock.CastShadow = false
+		rock.Material = Enum.Material.Slate
+		rock.Color = Color3.fromRGB(math.random(45, 75), math.random(40, 65), math.random(35, 55))
+		local angle = math.random() * math.pi * 2
+		local dist = math.random(1, 4)
+		-- Spawn at ground level, not floating
+		rock.CFrame = CFrame.new(groundPos + Vector3.new(math.cos(angle) * dist, 0.5, math.sin(angle) * dist))
+			* CFrame.Angles(math.random() * math.pi, math.random() * math.pi, math.random() * math.pi)
+		rock.Parent = workspace
+
+		local launchDir = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local upForce = rock:GetMass() * math.random(40, 70)
+		local outForce = rock:GetMass() * math.random(15, 35)
+		rock:ApplyImpulse(Vector3.new(launchDir.X * outForce, upForce, launchDir.Z * outForce))
+		rock:ApplyAngularImpulse(Vector3.new(math.random(-5, 5), math.random(-5, 5), math.random(-5, 5)))
+
+		task.delay(0.8, function()
+			if rock.Parent then
+				TweenService:Create(rock, TweenInfo.new(0.4), { Transparency = 1 }):Play()
+				Debris:AddItem(rock, 0.5)
+			end
+		end)
+	end
+
+	-- === 5. DUST CLOUD (ground level) ===
+	local dustAttach = Instance.new("Attachment")
+	dustAttach.WorldPosition = groundPos
+	dustAttach.Parent = workspace.Terrain
+
+	-- Upward dust burst
+	local dustUp = Instance.new("ParticleEmitter")
+	dustUp.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 160, 130)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 110, 100)),
+	})
+	dustUp.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 3),
+		NumberSequenceKeypoint.new(0.3, 6),
+		NumberSequenceKeypoint.new(1, 8),
+	})
+	dustUp.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.2),
+		NumberSequenceKeypoint.new(0.4, 0.5),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	dustUp.Lifetime = NumberRange.new(0.6, 1.2)
+	dustUp.Speed = NumberRange.new(15, 35)
+	dustUp.SpreadAngle = Vector2.new(30, 30)
+	dustUp.Drag = 4
+	dustUp.Rate = 0
+	dustUp.Rotation = NumberRange.new(0, 360)
+	dustUp.RotSpeed = NumberRange.new(-60, 60)
+	dustUp.Parent = dustAttach
+	dustUp:Emit(25)
+
+	-- Ground-spreading dust
+	local dustGround = Instance.new("ParticleEmitter")
+	dustGround.Color = ColorSequence.new(Color3.fromRGB(140, 130, 110))
+	dustGround.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 2),
+		NumberSequenceKeypoint.new(0.5, 5),
+		NumberSequenceKeypoint.new(1, 7),
+	})
+	dustGround.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.3),
+		NumberSequenceKeypoint.new(0.6, 0.6),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	dustGround.Lifetime = NumberRange.new(0.8, 1.5)
+	dustGround.Speed = NumberRange.new(10, 25)
+	dustGround.SpreadAngle = Vector2.new(180, 10)
+	dustGround.Drag = 6
+	dustGround.Rate = 0
+	dustGround.Rotation = NumberRange.new(0, 360)
+	dustGround.RotSpeed = NumberRange.new(-30, 30)
+	dustGround.Parent = dustAttach
+	dustGround:Emit(20)
+
+	Debris:AddItem(dustAttach, 2)
+
+	-- === 6. SCREEN SHAKE for nearby player ===
+	if ScreenShakeController then
+		local Players = game:GetService("Players")
+		local LocalPlayer = Players.LocalPlayer
+		local character = LocalPlayer.Character
+		if character then
+			local root = character:FindFirstChild("HumanoidRootPart")
+			if root then
+				local dist = (root.Position - position).Magnitude
+				if dist < 50 then
+					local intensity = math.clamp(1 - (dist / 50), 0.2, 1)
+					ScreenShakeController:Shake(intensity * 0.8, 0.25)
+				end
+			end
+		end
+	end
+end
+
+--[[
+    Create a horizontal hammer swing effect
+    Directional: uses enemy facing to sweep arc from right-to-left across body
+    Low horizontal swing - VFX appears in front of the enemy near waist/knee height
+    Layers: Sweep trail → Arc flash → Slash lines → Wind particles → Ground dust → Debris → Screen shake
+]]
+local function playSwingEffect(position: Vector3, damage: number, enemyModel: Model?)
+	-- Get enemy facing direction for directional VFX
+	local enemyRoot = nil
+	local swingDirection = Vector3.new(1, 0, 0) -- Default right direction
+	local forwardDir = Vector3.new(0, 0, -1)
+
+	if enemyModel then
+		enemyRoot = enemyModel:FindFirstChild("HumanoidRootPart")
+			or enemyModel:FindFirstChild("Torso")
+			or enemyModel.PrimaryPart
+	end
+
+	if enemyRoot then
+		forwardDir = enemyRoot.CFrame.LookVector
+		-- Swing goes from enemy's right to left (cross-body hammer sweep)
+		swingDirection = enemyRoot.CFrame.RightVector
+	end
+
+	-- Low swing: position VFX near ground level, far out in front of the large enemy
+	local swingCenter
+	if enemyRoot then
+		-- Low swing: -5 studs below root (near ground), 15 studs in front
+		swingCenter = enemyRoot.Position + Vector3.new(0, -5, 0) + forwardDir * 15
+	else
+		-- Fallback: just above the hit position (which is on the ground)
+		swingCenter = position + Vector3.new(0, 1, 0)
+	end
+
+	-- Client-side raycast to find the actual ground
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	local excludeList = CollectionService:GetTagged("Enemy")
+	for _, player in game:GetService("Players"):GetPlayers() do
+		if player.Character then
+			table.insert(excludeList, player.Character)
+		end
+	end
+	rayParams.FilterDescendantsInstances = excludeList
+
+	local rayOrigin = position + Vector3.new(0, 10, 0)
+	local rayResult = workspace:Raycast(rayOrigin, Vector3.new(0, -30, 0), rayParams)
+	local groundPos = if rayResult then rayResult.Position + Vector3.new(0, 0.05, 0) else position
+
+	-- === 1. HAMMER SWING ARC (smooth Trail ribbon) ===
+	-- Uses Roblox Trail instance for a smooth, non-blocky swing slash
+	local sweepRadius = 26
+	local sweepDuration = 0.25
+	local startAngle = math.rad(-90) -- Enemy's left
+	local endAngle = math.rad(60) -- Enemy's right (shorter end)
+
+	-- Pivot at enemy's low position
+	local pivotPos = if enemyRoot then enemyRoot.Position + Vector3.new(0, -5, 0) else position
+
+	-- Invisible part that carries the trail attachments along the arc
+	local trailPart = Instance.new("Part")
+	trailPart.Name = "SwingTrailCarrier"
+	trailPart.Anchored = true
+	trailPart.CanCollide = false
+	trailPart.CanQuery = false
+	trailPart.CanTouch = false
+	trailPart.CastShadow = false
+	trailPart.Transparency = 1
+	trailPart.Size = Vector3.new(1, 1, 1)
+	trailPart.Parent = workspace
+
+	-- Two attachments define the trail's width (spaced apart = trail height)
+	local attach0 = Instance.new("Attachment")
+	attach0.Position = Vector3.new(0, 2, 0) -- Top edge of trail
+	attach0.Parent = trailPart
+
+	local attach1 = Instance.new("Attachment")
+	attach1.Position = Vector3.new(0, -2, 0) -- Bottom edge of trail
+	attach1.Parent = trailPart
+
+	-- The Trail instance - creates a smooth ribbon as the part moves
+	local trail = Instance.new("Trail")
+	trail.Attachment0 = attach0
+	trail.Attachment1 = attach1
+	trail.Lifetime = 0.4 -- How long the trail ribbon stays visible
+	trail.MinLength = 0.1
+	trail.FaceCamera = true
+	trail.LightEmission = 0.8 -- Glow effect
+	trail.LightInfluence = 0
+	trail.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 240, 150)), -- Bright white-yellow at leading edge
+		ColorSequenceKeypoint.new(0.3, Color3.fromRGB(255, 180, 60)), -- Warm orange
+		ColorSequenceKeypoint.new(0.7, Color3.fromRGB(230, 100, 20)), -- Deep orange
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 50, 10)), -- Dark red at trailing edge
+	})
+	trail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0), -- Solid at leading edge
+		NumberSequenceKeypoint.new(0.5, 0.2),
+		NumberSequenceKeypoint.new(0.8, 0.6),
+		NumberSequenceKeypoint.new(1, 1), -- Fully faded at trailing edge
+	})
+	trail.WidthScale = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1), -- Full width at leading edge
+		NumberSequenceKeypoint.new(0.5, 1.2), -- Slightly wider in middle
+		NumberSequenceKeypoint.new(1, 0.3), -- Tapers at trailing edge
+	})
+	trail.Parent = trailPart
+
+	-- Position the carrier at the start of the arc before enabling
+	local startDir = forwardDir * math.cos(startAngle) + swingDirection * math.sin(startAngle)
+	trailPart.Position = pivotPos + startDir * sweepRadius
+
+	-- Animate the carrier part along the arc
+	task.spawn(function()
+		-- Let the trail attach first frame
+		task.wait()
+
+		local startTime = os.clock()
+		while true do
+			local elapsed = os.clock() - startTime
+			local t = math.clamp(elapsed / sweepDuration, 0, 1)
+			if t >= 1 then
+				break
+			end
+
+			-- Easing: slow start, fast middle, slow end
+			local eased
+			if t < 0.12 then
+				eased = (t / 0.12) * 0.03
+			elseif t < 0.88 then
+				local mid = (t - 0.12) / 0.76
+				eased = 0.03 + mid * 0.94
+			else
+				local tail = (t - 0.88) / 0.12
+				eased = 0.97 + tail * 0.03
+			end
+
+			local currentAngle = startAngle + (endAngle - startAngle) * eased
+			local outDir = forwardDir * math.cos(currentAngle) + swingDirection * math.sin(currentAngle)
+			trailPart.Position = pivotPos + outDir * sweepRadius
+
+			task.wait()
+		end
+
+		-- Final position
+		local endDir = forwardDir * math.cos(endAngle) + swingDirection * math.sin(endAngle)
+		trailPart.Position = pivotPos + endDir * sweepRadius
+
+		-- Disable trail so it stops drawing, then let existing trail fade naturally
+		task.wait(0.05)
+		trail.Enabled = false
+	end)
+
+	Debris:AddItem(trailPart, sweepDuration + trail.Lifetime + 0.2)
+
+	-- === 4. WIND/FORCE PARTICLES (burst outward from the swing arc) ===
+	local windAttach = Instance.new("Attachment")
+	windAttach.WorldPosition = swingCenter
+	windAttach.Parent = workspace.Terrain
+
+	local windParticles = Instance.new("ParticleEmitter")
+	windParticles.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 200, 120)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(200, 140, 60)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(140, 100, 40)),
+	})
+	windParticles.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.5),
+		NumberSequenceKeypoint.new(0.3, 2.5),
+		NumberSequenceKeypoint.new(1, 4),
+	})
+	windParticles.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.1),
+		NumberSequenceKeypoint.new(0.4, 0.4),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	windParticles.Lifetime = NumberRange.new(0.2, 0.6)
+	windParticles.Speed = NumberRange.new(15, 40)
+	windParticles.SpreadAngle = Vector2.new(60, 30)
+	windParticles.Drag = 4
+	windParticles.Rate = 0
+	windParticles.Rotation = NumberRange.new(0, 360)
+	windParticles.RotSpeed = NumberRange.new(-80, 80)
+	windParticles.Parent = windAttach
+	windParticles:Emit(20)
+
+	Debris:AddItem(windAttach, 1)
+
+	-- === 5. GROUND DUST (kicked up along the sweep path) ===
+	local dustAttach = Instance.new("Attachment")
+	dustAttach.WorldPosition = groundPos
+	dustAttach.Parent = workspace.Terrain
+
+	local dust = Instance.new("ParticleEmitter")
+	dust.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 160, 130)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 110, 95)),
+	})
+	dust.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 2),
+		NumberSequenceKeypoint.new(0.4, 4),
+		NumberSequenceKeypoint.new(1, 6),
+	})
+	dust.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.2),
+		NumberSequenceKeypoint.new(0.5, 0.5),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	dust.Lifetime = NumberRange.new(0.4, 1.0)
+	dust.Speed = NumberRange.new(8, 25)
+	dust.SpreadAngle = Vector2.new(160, 15)
+	dust.Drag = 5
+	dust.Rate = 0
+	dust.Rotation = NumberRange.new(0, 360)
+	dust.RotSpeed = NumberRange.new(-50, 50)
+	dust.Parent = dustAttach
+	dust:Emit(16)
+
+	-- Second dust point offset along the swing direction
+	local dustAttach2 = Instance.new("Attachment")
+	dustAttach2.WorldPosition = groundPos + swingDirection * 5
+	dustAttach2.Parent = workspace.Terrain
+
+	local dust2 = dust:Clone()
+	dust2.Parent = dustAttach2
+	dust2:Emit(10)
+
+	Debris:AddItem(dustAttach, 1.5)
+	Debris:AddItem(dustAttach2, 1.5)
+
+	-- === 6. SMALL DEBRIS (pebbles flung by the force) ===
+	for _ = 1, 3 do
+		local pebbleSize = math.random(5, 12) / 10
+		local pebble = Instance.new("Part")
+		pebble.Size = Vector3.new(pebbleSize, pebbleSize * 0.6, pebbleSize)
+		pebble.Anchored = false
+		pebble.CanCollide = true
+		pebble.CanQuery = false
+		pebble.CanTouch = false
+		pebble.CastShadow = false
+		pebble.Material = Enum.Material.Slate
+		pebble.Color = Color3.fromRGB(math.random(50, 80), math.random(45, 70), math.random(40, 60))
+		local angle = math.random() * math.pi * 2
+		local dist = math.random(1, 3)
+		pebble.CFrame = CFrame.new(groundPos + Vector3.new(math.cos(angle) * dist, 0.3, math.sin(angle) * dist))
+			* CFrame.Angles(math.random() * math.pi, math.random() * math.pi, math.random() * math.pi)
+		pebble.Parent = workspace
+
+		-- Launch in the swing direction (left) with some upward force
+		local launchDir = (-swingDirection + Vector3.new(0, 0.5, 0) + forwardDir * 0.3).Unit
+		local upForce = pebble:GetMass() * math.random(25, 45)
+		local outForce = pebble:GetMass() * math.random(10, 25)
+		pebble:ApplyImpulse(Vector3.new(launchDir.X * outForce, upForce, launchDir.Z * outForce))
+		pebble:ApplyAngularImpulse(Vector3.new(math.random(-3, 3), math.random(-3, 3), math.random(-3, 3)))
+
+		task.delay(0.7, function()
+			if pebble.Parent then
+				TweenService:Create(pebble, TweenInfo.new(0.3), { Transparency = 1 }):Play()
+				Debris:AddItem(pebble, 0.4)
+			end
+		end)
+	end
+
+	-- === 7. SCREEN SHAKE (medium intensity) ===
+	if ScreenShakeController then
+		local Players = game:GetService("Players")
+		local LocalPlayer = Players.LocalPlayer
+		local character = LocalPlayer.Character
+		if character then
+			local root = character:FindFirstChild("HumanoidRootPart")
+			if root then
+				local dist = (root.Position - position).Magnitude
+				if dist < 45 then
+					local intensity = math.clamp(1 - (dist / 45), 0.1, 0.8)
+					ScreenShakeController:Shake(intensity * 0.6, 0.18)
+				end
+			end
+		end
+	end
+end
+
+--[[
     Handle enemy attack event
-    Shows damage taken and screen shake when player is hit
+    Shows damage taken, screen shake, and slam VFX
 ]]
 local function onEnemyAttack(data)
-	-- data = { Enemy, Target, HitPosition, Damage }
+	-- data = { Enemy, Target, HitPosition, Damage, AttackType, IsSlam }
 
 	local enemy = data.Enemy
 	local target = data.Target
 	local hitPosition = data.HitPosition
 	local damage = data.Damage
+	local attackType = data.AttackType
+
+	-- Attack-specific VFX
+	if hitPosition then
+		if attackType == "Slam" or (not attackType and data.IsSlam) then
+			playSlamEffect(hitPosition, damage or 15)
+		elseif attackType == "Swing" then
+			playSwingEffect(hitPosition, damage or 12, enemy)
+		end
+	end
 
 	-- Create attack telegraph on enemy
 	if enemy and target then
 		createAttackIndicator(enemy, hitPosition)
 	end
 
-	-- If we're the target, show effects
-	local Players = game:GetService("Players")
-	local LocalPlayer = Players.LocalPlayer
-
-	if target == LocalPlayer then
-		-- Screen shake (we got hit!)
-		if ScreenShakeController then
-			ScreenShakeController:Shake(0.5, 0.15)
-		end
-
-		-- Damage number on our character (shows damage we took)
-		if DamageNumbers and LocalPlayer.Character then
-			DamageNumbers:SpawnOnCharacter(LocalPlayer.Character, damage, "Normal")
-		end
-
-		-- Red vignette flash (screen damage indicator)
-		-- This would be implemented in a ScreenEffects module
-	end
+	-- NOTE: Damage numbers and hit screen shake are NOT shown here.
+	-- This event fires BEFORE hit detection, so we don't know if the player
+	-- was actually hit or dodged. Damage numbers should be driven by actual
+	-- health changes on the Humanoid, not this event.
 end
 
 --[[
@@ -478,6 +986,42 @@ function EnemyVFXController:Start()
 	if stateRemote then
 		table.insert(connections, stateRemote.OnClientEvent:Connect(onEnemyStateChanged))
 	end
+
+	-- Listen for player health changes to show damage numbers on actual hits
+	local Players = game:GetService("Players")
+	local LocalPlayer = Players.LocalPlayer
+
+	local function onCharacterAdded(character: Model)
+		local humanoid = character:WaitForChild("Humanoid", 10) :: Humanoid?
+		if not humanoid then
+			return
+		end
+
+		lastPlayerHealth = humanoid.Health
+
+		local healthConn = humanoid.HealthChanged:Connect(function(newHealth: number)
+			local oldHealth = lastPlayerHealth or humanoid.MaxHealth
+			lastPlayerHealth = newHealth
+
+			local delta = oldHealth - newHealth
+			if delta > 0 then
+				-- Player took damage — show damage number and screen shake
+				if DamageNumbers then
+					DamageNumbers:SpawnOnCharacter(character, delta, "Normal")
+				end
+				if ScreenShakeController then
+					local intensity = math.clamp(delta / 30, 0.15, 0.6)
+					ScreenShakeController:Shake(intensity, 0.15)
+				end
+			end
+		end)
+		table.insert(connections, healthConn)
+	end
+
+	if LocalPlayer.Character then
+		task.spawn(onCharacterAdded, LocalPlayer.Character)
+	end
+	table.insert(connections, LocalPlayer.CharacterAdded:Connect(onCharacterAdded))
 
 	print("[EnemyVFXController] Started")
 end
