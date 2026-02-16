@@ -98,6 +98,10 @@ local function onEnemyAttack(data)
 			AttackVFXPlayer:Play("Slam", hitPosition, damage or 15)
 		elseif attackType == "Swing" then
 			AttackVFXPlayer:Play("Swing", hitPosition, damage or 12, enemy)
+		elseif attackType == "LeapStart" then
+			AttackVFXPlayer:Play("LeapStart", hitPosition, damage or 25, enemy)
+		elseif attackType == "LeapSlam" then
+			AttackVFXPlayer:Play("LeapSlam", hitPosition, damage or 25, enemy)
 		end
 	end
 

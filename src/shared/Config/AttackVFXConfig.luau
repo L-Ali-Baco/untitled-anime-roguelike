@@ -11,8 +11,8 @@
 
 return {
 	--[[
-        Ground slam — heavy downward impact (Brute slam, boss stomp, etc.)
-        Layers: Flash → Ground crack → Shockwave rings → Rock debris → Dust clouds → Screen shake
+        Ground slam -- heavy downward impact (Brute slam, boss stomp, etc.)
+        Layers: Flash, Ground crack, Shockwave rings, Rock debris, Dust clouds, Screen shake
     ]]
 	Slam = {
 		Radius = 18,
@@ -131,8 +131,8 @@ return {
 	},
 
 	--[[
-        Horizontal swing — weapon sweep arc (Brute hammer, boss sword, etc.)
-        Layers: Trail ribbon arc → Wind particles → Ground dust → Small debris → Screen shake
+        Horizontal swing -- weapon sweep arc (Brute hammer, boss sword, etc.)
+        Layers: Trail ribbon arc, Wind particles, Ground dust, Small debris, Screen shake
     ]]
 	Swing = {
 		-- Trail arc parameters
@@ -236,6 +236,181 @@ return {
 			MaxDist = 45,
 			MaxIntensity = 0.6,
 			Duration = 0.18,
+		},
+	},
+
+	--[[
+        Leap wind-up -- dust swirling inward as Brute crouches to jump
+    ]]
+	LeapStart = {
+		-- Dust sucked inward toward the enemy's feet (power gathering effect)
+		Dust = {
+			Up = {
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, Color3.fromRGB(160, 140, 110)),
+					ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 90, 75)),
+				}),
+				Size = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 4),
+					NumberSequenceKeypoint.new(0.5, 2),
+					NumberSequenceKeypoint.new(1, 0.5),
+				}),
+				Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 0.4),
+					NumberSequenceKeypoint.new(0.6, 0.6),
+					NumberSequenceKeypoint.new(1, 1),
+				}),
+				Lifetime = NumberRange.new(0.8, 1.4),
+				Speed = NumberRange.new(3, 8),
+				SpreadAngle = Vector2.new(180, 30),
+				Drag = 2,
+				RotSpeed = NumberRange.new(-40, 40),
+				EmitCount = 15,
+			},
+			AttachmentLifetime = 2,
+		},
+
+		-- Small ground crack from crouch force
+		GroundCrack = {
+			Shape = Enum.PartType.Cylinder,
+			Material = Enum.Material.Slate,
+			Color = Color3.fromRGB(40, 35, 30),
+			Transparency = 0.4,
+			StartSize = Vector3.new(0.1, 0.5, 0.5),
+			ExpandDuration = 0.3,
+			HoldTime = 1.5,
+			FadeDuration = 0.8,
+		},
+
+		Radius = 8, -- Smaller radius for wind-up
+
+		ScreenShake = {
+			MaxDist = 30,
+			MaxIntensity = 0.3,
+			Duration = 0.4,
+		},
+	},
+
+	--[[
+        Leap slam landing -- enhanced slam (bigger and stronger than normal slam)
+        The Brute crashes down from height, creating a massive impact
+    ]]
+	LeapSlam = {
+		Radius = 24, -- Bigger than normal slam (18)
+
+		ImpactFlash = {
+			Shape = Enum.PartType.Ball,
+			Material = Enum.Material.Neon,
+			Color = Color3.fromRGB(255, 200, 100),
+			Transparency = 0,
+			StartSize = Vector3.new(6, 6, 6),
+			TweenTo = { Size = Vector3.new(16, 10, 16), Transparency = 1 },
+			TweenDuration = 0.2,
+			Lifetime = 0.25,
+		},
+
+		GroundCrack = {
+			Shape = Enum.PartType.Cylinder,
+			Material = Enum.Material.Slate,
+			Color = Color3.fromRGB(25, 20, 15),
+			Transparency = 0.2,
+			StartSize = Vector3.new(0.2, 1, 1),
+			ExpandDuration = 0.12,
+			HoldTime = 1.2,
+			FadeDuration = 1.5,
+		},
+
+		ShockwaveRings = {
+			{
+				Color = Color3.fromRGB(255, 140, 50),
+				StartSize = Vector3.new(2, 4, 4),
+				HeightOffset = 0.3,
+				Duration = 0.4,
+				Lifetime = 0.5,
+				Delay = 0,
+			},
+			{
+				Color = Color3.fromRGB(255, 220, 120),
+				StartSize = Vector3.new(1.5, 3, 3),
+				HeightOffset = 0.15,
+				Duration = 0.5,
+				Lifetime = 0.55,
+				Delay = 0.08,
+				Transparency = 0.2,
+				RadiusMultiplier = 0.7,
+			},
+			{
+				Color = Color3.fromRGB(200, 100, 30),
+				StartSize = Vector3.new(1, 2, 2),
+				HeightOffset = 0.1,
+				Duration = 0.6,
+				Lifetime = 0.65,
+				Delay = 0.15,
+				Transparency = 0.4,
+				RadiusMultiplier = 0.5,
+			},
+		},
+
+		RockDebris = {
+			Count = 12, -- More rocks than normal slam
+			SizeRange = { 2, 5 }, -- Bigger rocks
+			ColorRange = { 40, 70, 35, 60, 30, 50 },
+			LaunchUp = { 50, 90 }, -- Higher launch
+			LaunchOut = { 20, 45 }, -- Further spread
+			SpawnRadius = { 1, 5 },
+			FadeDelay = 1.0,
+			FadeDuration = 0.5,
+		},
+
+		Dust = {
+			Up = {
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, Color3.fromRGB(200, 180, 150)),
+					ColorSequenceKeypoint.new(1, Color3.fromRGB(130, 120, 105)),
+				}),
+				Size = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 4),
+					NumberSequenceKeypoint.new(0.3, 8),
+					NumberSequenceKeypoint.new(1, 12),
+				}),
+				Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 0.1),
+					NumberSequenceKeypoint.new(0.3, 0.4),
+					NumberSequenceKeypoint.new(1, 1),
+				}),
+				Lifetime = NumberRange.new(0.8, 1.5),
+				Speed = NumberRange.new(20, 45),
+				SpreadAngle = Vector2.new(40, 40),
+				Drag = 3,
+				RotSpeed = NumberRange.new(-80, 80),
+				EmitCount = 35,
+			},
+			Ground = {
+				Color = ColorSequence.new(Color3.fromRGB(150, 140, 120)),
+				Size = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 3),
+					NumberSequenceKeypoint.new(0.5, 7),
+					NumberSequenceKeypoint.new(1, 10),
+				}),
+				Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 0.2),
+					NumberSequenceKeypoint.new(0.5, 0.5),
+					NumberSequenceKeypoint.new(1, 1),
+				}),
+				Lifetime = NumberRange.new(1.0, 2.0),
+				Speed = NumberRange.new(15, 35),
+				SpreadAngle = Vector2.new(180, 15),
+				Drag = 5,
+				RotSpeed = NumberRange.new(-40, 40),
+				EmitCount = 30,
+			},
+			AttachmentLifetime = 3,
+		},
+
+		ScreenShake = {
+			MaxDist = 60, -- Bigger shake range
+			MaxIntensity = 1.0, -- Stronger shake
+			Duration = 0.35,
 		},
 	},
 }

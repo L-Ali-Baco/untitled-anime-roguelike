@@ -34,6 +34,7 @@ local AIState = {
 	Idle = "Idle",
 	Chase = "Chase",
 	Attack = "Attack",
+	LeapAttack = "LeapAttack",
 	Hitstun = "Hitstun",
 	Dead = "Dead",
 }
@@ -55,6 +56,7 @@ type EnemyData = {
 	LinearVelocity: LinearVelocity?, -- Movement constraint
 	AlignOrientation: AlignOrientation?, -- Facing constraint
 	Animator: Animator?, -- For rigged models
+	WalkTrack: AnimationTrack?, -- Preloaded walk animation
 	EnemyType: string,
 	Config: any,
 	State: string,
@@ -71,6 +73,7 @@ type EnemyData = {
 	LastPos: Vector3?, -- For unstuck detection
 	LastPosTime: number?, -- For unstuck detection
 	AttackTriggered: boolean, -- Whether attack was triggered this attack state
+	CurrentAttack: any?, -- Selected attack data from config.Attacks (if multi-attack)
 }
 
 -- AI update accumulator
@@ -223,7 +226,23 @@ local function moveTowardTarget(enemyData: EnemyData)
 	end
 
 	local currentPos = enemyData.RootPart.Position
-	local distanceToTarget = (targetPos - currentPos).Magnitude
+	local fullDiff = targetPos - currentPos
+	local horizontalDist = Vector3.new(fullDiff.X, 0, fullDiff.Z).Magnitude
+	local verticalDist = math.abs(fullDiff.Y)
+
+	-- Target is on top of us — stop chasing to prevent spinning/launching
+	if verticalDist > horizontalDist * 1.5 and verticalDist > 4 then
+		if enemyData.IsMoving then
+			if enemyData.LinearVelocity then
+				enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+			end
+			enemyData.IsMoving = false
+			enemyData.LastMoveTarget = nil
+		end
+		return
+	end
+
+	local distanceToTarget = horizontalDist
 
 	local stopDistance = enemyData.Config.StopDistanceFromTarget or 2.5
 	local startChaseDistance = stopDistance + 1.5 -- Hysteresis buffer to prevent jitter
@@ -300,12 +319,17 @@ local function faceTarget(enemyData: EnemyData)
 		return
 	end
 
-	local direction = (targetPos - enemyData.RootPart.Position)
-	direction = Vector3.new(direction.X, 0, direction.Z)
+	local fullDirection = targetPos - enemyData.RootPart.Position
+	local horizontalDir = Vector3.new(fullDirection.X, 0, fullDirection.Z)
+	local horizontalDist = horizontalDir.Magnitude
+	local verticalDist = math.abs(fullDirection.Y)
 
-	if direction.Magnitude < 0.1 then
+	-- Skip if target is mostly above/below (on top of us) or too close horizontally
+	if horizontalDist < 3 or verticalDist > horizontalDist * 1.5 then
 		return
 	end
+
+	local direction = horizontalDir
 
 	-- Use AlignOrientation to smoothly rotate toward target (prevents direct CFrame conflicts)
 	local targetCFrame = CFrame.lookAt(enemyData.RootPart.Position, enemyData.RootPart.Position + direction)
@@ -325,75 +349,306 @@ local function faceTarget(enemyData: EnemyData)
 end
 
 --[[
-    Perform enemy attack on player
+    Pick a random attack from config.Attacks weighted by Weight field
 ]]
-local function performAttack(enemyData: EnemyData)
+local function pickWeightedAttack(attacks: { any }, distanceToTarget: number?): any
+	-- Filter attacks by range constraints (MinRange/MaxRange)
+	local eligible = {}
+	for _, atk in attacks do
+		local inRange = true
+		if distanceToTarget and atk.MinRange and distanceToTarget < atk.MinRange then
+			inRange = false
+		end
+		if distanceToTarget and atk.MaxRange and distanceToTarget > atk.MaxRange then
+			inRange = false
+		end
+		if inRange then
+			table.insert(eligible, atk)
+		end
+	end
+
+	-- Fallback: if no attacks are eligible, use all attacks
+	if #eligible == 0 then
+		eligible = attacks
+	end
+
+	local totalWeight = 0
+	for _, atk in eligible do
+		totalWeight += (atk.Weight or 1)
+	end
+	local roll = math.random() * totalWeight
+	local cumulative = 0
+	for _, atk in eligible do
+		cumulative += (atk.Weight or 1)
+		if roll <= cumulative then
+			return atk
+		end
+	end
+	return eligible[1]
+end
+
+--[[
+    Apply a speed curve to an animation track over its duration.
+    SpeedCurve is an array of {time_fraction, speed} keypoints, linearly interpolated.
+]]
+local function applySpeedCurve(track: AnimationTrack, duration: number, curve: { { number } })
+	task.spawn(function()
+		local startTime = tick()
+		while tick() - startTime < duration do
+			local elapsed = tick() - startTime
+			local t = math.clamp(elapsed / duration, 0, 1)
+
+			-- Find surrounding keypoints and lerp
+			local speed = curve[1][2]
+			for i = 1, #curve - 1 do
+				local k0 = curve[i]
+				local k1 = curve[i + 1]
+				if t >= k0[1] and t <= k1[1] then
+					local alpha = (t - k0[1]) / (k1[1] - k0[1])
+					speed = k0[2] + (k1[2] - k0[2]) * alpha
+					break
+				elseif t > k1[1] then
+					speed = k1[2]
+				end
+			end
+
+			track:AdjustSpeed(speed)
+			task.wait()
+		end
+	end)
+end
+
+--[[
+    Perform a leap attack (multi-phase: wind-up -> jump -> fly -> land slam)
+    Used for gap-closing abilities like the Brute's LeapSlam
+]]
+local function performLeapAttack(enemyData: EnemyData)
 	if not enemyData.Target then
 		return
 	end
 
 	local target = enemyData.Target
-	local config = enemyData.Config
+	local attackData = enemyData.CurrentAttack
+	if not attackData then
+		return
+	end
 
-	-- Apply damage after windup
-	task.delay(config.AttackWindup or 0.3, function()
-		-- Re-check target is still valid and in range
-		if not enemyData.Target or enemyData.State == AIState.Dead then
-			return
+	local windupDuration = attackData.WindupDuration or 1.2
+	local flightDuration = attackData.FlightDuration or 0.6
+	local flightHeight = attackData.FlightHeight or 25
+	local landDuration = attackData.LandDuration or 0.8
+	local attackDamage = attackData.Damage or 25
+	local hitRadius = attackData.HitRadius or 20
+	local vfxType = attackData.VFXType or "LeapSlam"
+
+	local rootPart = enemyData.RootPart
+	if not rootPart or not rootPart.Parent then
+		return
+	end
+
+	-- Stop all movement
+	if enemyData.LinearVelocity then
+		enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+	end
+
+	-- Face target before wind-up
+	faceTarget(enemyData)
+
+	-- === PHASE 1: WIND-UP (slow crouch animation) ===
+	local windupTrack = nil
+	if attackData.WindupAnimId and enemyData.Animator then
+		pcall(function()
+			local anim = Instance.new("Animation")
+			anim.AnimationId = attackData.WindupAnimId
+			windupTrack = enemyData.Animator:LoadAnimation(anim)
+			windupTrack.Priority = Enum.AnimationPriority.Action4
+			windupTrack:Play()
+			windupTrack:AdjustSpeed(attackData.WindupAnimSpeed or 0.4)
+		end)
+	end
+
+	-- Fire wind-up VFX event
+	local enemyAttackRemote = Remotes:GetEvent("EnemyAttack")
+	if enemyAttackRemote then
+		enemyAttackRemote:FireAllClients({
+			Enemy = enemyData.Model,
+			Target = target,
+			HitPosition = rootPart.Position,
+			Damage = attackDamage,
+			AttackType = "LeapStart",
+		})
+	end
+
+	-- Wait for wind-up to complete
+	task.wait(windupDuration)
+
+	-- Validate still alive
+	if not rootPart or not rootPart.Parent or enemyData.State == AIState.Dead then
+		if windupTrack then
+			windupTrack:Stop()
+		end
+		return
+	end
+
+	-- === PHASE 2: LAUNCH + FLIGHT ===
+	-- Get target's current position for landing
+	local targetPos = getTargetPosition(target)
+	if not targetPos then
+		if windupTrack then
+			windupTrack:Stop()
+		end
+		enemyData.State = AIState.Chase
+		return
+	end
+
+	-- Stop wind-up, play mid-air loop
+	if windupTrack then
+		windupTrack:Stop(0.1)
+	end
+
+	local midairTrack = nil
+	if attackData.MidairAnimId and enemyData.Animator then
+		pcall(function()
+			local anim = Instance.new("Animation")
+			anim.AnimationId = attackData.MidairAnimId
+			midairTrack = enemyData.Animator:LoadAnimation(anim)
+			midairTrack.Priority = Enum.AnimationPriority.Action4
+			midairTrack.Looped = true
+			midairTrack:Play()
+		end)
+	end
+
+	-- Disable gravity and move through the air
+	local startPos = rootPart.Position
+	local landingPos = targetPos -- Aim for player's current position
+
+	-- Temporarily make the enemy anchored for flight control
+	local wasAnchored = rootPart.Anchored
+	rootPart.Anchored = true
+	if enemyData.LinearVelocity then
+		enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+	end
+
+	-- Animate flight arc (parabolic: up at start, down at end)
+	local flightStart = tick()
+	while true do
+		local elapsed = tick() - flightStart
+		local t = math.clamp(elapsed / flightDuration, 0, 1)
+		if t >= 1 then
+			break
 		end
 
-		-- Re-fetch character (player may have respawned)
-		local character = target.Character
+		-- Parabolic height: peaks at t=0.5
+		local heightT = 4 * t * (1 - t) -- 0 at start/end, 1 at peak
+		local currentHeight = flightHeight * heightT
+
+		-- Horizontal lerp from start to landing
+		local horizontalPos = startPos:Lerp(landingPos, t)
+
+		-- Set position with height offset
+		rootPart.CFrame = CFrame.new(
+			horizontalPos.X,
+			math.max(startPos.Y, landingPos.Y) + currentHeight,
+			horizontalPos.Z
+		) * CFrame.new(0, 0, 0) -- Keep orientation
+
+		-- Face the landing spot
+		local lookDir = (landingPos - rootPart.Position)
+		if lookDir.Magnitude > 1 then
+			local lookCFrame =
+				CFrame.lookAt(rootPart.Position, Vector3.new(landingPos.X, rootPart.Position.Y, landingPos.Z))
+			rootPart.CFrame = lookCFrame + (rootPart.Position - lookCFrame.Position)
+		end
+
+		task.wait()
+	end
+
+	-- === PHASE 3: LANDING ===
+	-- Restore physics
+	rootPart.Anchored = wasAnchored
+
+	-- Stop mid-air anim, play landing slam
+	if midairTrack then
+		midairTrack:Stop(0.1)
+	end
+
+	if attackData.LandAnimId and enemyData.Animator then
+		pcall(function()
+			local anim = Instance.new("Animation")
+			anim.AnimationId = attackData.LandAnimId
+			local landTrack = enemyData.Animator:LoadAnimation(anim)
+			landTrack.Priority = Enum.AnimationPriority.Action4
+			landTrack:Play()
+		end)
+	end
+
+	-- Raycast to find ground at landing position
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = CollectionService:GetTagged(CombatConfig.Targeting.TargetTag)
+	local rayOrigin = Vector3.new(landingPos.X, rootPart.Position.Y + 5, landingPos.Z)
+	local rayResult = workspace:Raycast(rayOrigin, Vector3.new(0, -50, 0), rayParams)
+	local impactPos = if rayResult then rayResult.Position else landingPos
+
+	-- Snap to ground
+	rootPart.CFrame = CFrame.new(impactPos.X, impactPos.Y + 3, impactPos.Z)
+		* CFrame.Angles(0, rootPart.CFrame:ToEulerAnglesYXZ())
+
+	-- Fire landing VFX event
+	if enemyAttackRemote then
+		enemyAttackRemote:FireAllClients({
+			Enemy = enemyData.Model,
+			Target = target,
+			HitPosition = impactPos,
+			Damage = attackDamage,
+			AttackType = vfxType, -- "LeapSlam"
+			IsSlam = true,
+		})
+	end
+
+	-- Hit detection at landing point
+	for _, player in Players:GetPlayers() do
+		local character = player.Character
 		if not character then
-			return
+			continue
+		end
+		local targetRoot = character:FindFirstChild("HumanoidRootPart")
+		if not targetRoot then
+			continue
+		end
+
+		local dist = (targetRoot.Position - impactPos).Magnitude
+		if dist > hitRadius then
+			continue
 		end
 
 		local targetHumanoid = character:FindFirstChildOfClass("Humanoid")
 		if not targetHumanoid or targetHumanoid.Health <= 0 then
-			return
+			continue
 		end
 
-		local targetRoot = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Root")
-		if not targetRoot then
-			return
-		end
-
-		-- Check enemy root part still exists
-		if not enemyData.RootPart or not enemyData.RootPart.Parent then
-			return
-		end
-
-		local distance = (targetRoot.Position - enemyData.RootPart.Position).Magnitude
-		if distance > (config.AttackRange or 4) * 1.5 then
-			return -- Target moved out of range
-		end
-
-		-- Check if player has I-frames (dodge immunity)
-		local iframeExpiry = playerIFrames[target]
+		-- Check I-frames
+		local iframeExpiry = playerIFrames[player]
 		if iframeExpiry and tick() < iframeExpiry then
-			-- Player dodged! Send blocked event for VFX
 			local damageBlockedRemote = Remotes:GetEvent("DamageBlocked")
 			if damageBlockedRemote then
-				damageBlockedRemote:FireClient(target, {
+				damageBlockedRemote:FireClient(player, {
 					Enemy = enemyData.Model,
 					Position = targetRoot.Position,
-					DamageBlocked = config.Damage or 5,
+					DamageBlocked = attackDamage,
 				})
 			end
-			return -- Don't deal damage
+			continue
 		end
 
-		-- Deal damage (Shield Logic)
-		local damage = config.Damage or 5
-
-		-- Apply Damage Resistance
+		-- Apply damage
+		local damage = attackDamage
 		local resistance = character:GetAttribute("DamageResistance") or 0
 		if resistance > 0 then
 			damage = damage * (1 - math.clamp(resistance, 0, 1))
 		end
 
 		local currentShield = character:GetAttribute("Shield") or 0
-
 		if currentShield > 0 then
 			if currentShield >= damage then
 				character:SetAttribute("Shield", currentShield - damage)
@@ -408,21 +663,149 @@ local function performAttack(enemyData: EnemyData)
 			targetHumanoid:TakeDamage(damage)
 		end
 
-		-- Apply knockback to player
-		local knockbackDir = (targetRoot.Position - enemyData.RootPart.Position)
-		knockbackDir = Vector3.new(knockbackDir.X, 0.3, knockbackDir.Z).Unit
-		targetRoot.AssemblyLinearVelocity = targetRoot.AssemblyLinearVelocity + knockbackDir * 10
+		-- Apply knockback (stronger for leap slam)
+		local knockbackDir = (targetRoot.Position - impactPos)
+		knockbackDir = Vector3.new(knockbackDir.X, 0.5, knockbackDir.Z).Unit
+		targetRoot.AssemblyLinearVelocity = targetRoot.AssemblyLinearVelocity + knockbackDir * 35
+	end
 
-		-- Fire event for client VFX
+	-- Recovery period then return to chase
+	task.delay(landDuration, function()
+		if enemyData.State == AIState.LeapAttack then
+			enemyData.State = AIState.Chase
+			enemyData.CurrentAttack = nil
+			if enemyData.WalkTrack and not enemyData.WalkTrack.IsPlaying then
+				enemyData.WalkTrack:Play(0.2)
+			end
+		end
+	end)
+end
+
+--[[
+    Perform enemy attack on player
+]]
+local function performAttack(enemyData: EnemyData)
+	if not enemyData.Target then
+		return
+	end
+
+	local target = enemyData.Target
+	local config = enemyData.Config
+	local attackData = enemyData.CurrentAttack -- nil for non-multi-attack enemies
+
+	local windup = if attackData then attackData.Windup else (config.AttackWindup or 0.3)
+	local attackDamage = if attackData then attackData.Damage else (config.Damage or 5)
+	local forwardDist = if attackData then attackData.ForwardDist else 4
+	local hitRadius = if attackData then attackData.HitRadius else 15
+	local vfxType = if attackData then attackData.VFXType else nil
+
+	-- Apply damage after windup
+	task.delay(windup, function()
+		-- 1. Validate Enemy State
+		if not enemyData.RootPart or not enemyData.RootPart.Parent or enemyData.State == AIState.Dead then
+			return
+		end
+
+		-- 2. Calculate Impact Position (In front of enemy, on the ground)
+		local impactPos = enemyData.RootPart.Position + (enemyData.RootPart.CFrame.LookVector * forwardDist)
+
+		-- Raycast down to find actual floor (exclude enemies)
+		local rayParams = RaycastParams.new()
+		rayParams.FilterType = Enum.RaycastFilterType.Exclude
+		rayParams.FilterDescendantsInstances = CollectionService:GetTagged(CombatConfig.Targeting.TargetTag)
+		local rayOrigin = Vector3.new(impactPos.X, enemyData.RootPart.Position.Y + 5, impactPos.Z)
+		local rayResult = workspace:Raycast(rayOrigin, Vector3.new(0, -20, 0), rayParams)
+		if rayResult then
+			impactPos = rayResult.Position
+		else
+			-- Fallback: estimate ground from root part
+			impactPos = Vector3.new(impactPos.X, enemyData.RootPart.Position.Y - 3, impactPos.Z)
+		end
+
+		-- 3. Fire VFX Event (Always happens if enemy is alive)
 		local enemyAttackRemote = Remotes:GetEvent("EnemyAttack")
 		if enemyAttackRemote then
 			enemyAttackRemote:FireAllClients({
 				Enemy = enemyData.Model,
 				Target = target,
-				HitPosition = targetRoot.Position,
-				Damage = config.Damage or 5,
+				HitPosition = impactPos,
+				Damage = attackDamage,
+				AttackType = vfxType, -- "Slam", "Swing", or nil
+				IsSlam = (vfxType == "Slam"), -- Backward compat for client
 			})
 		end
+
+		-- 4. Hit Detection (Simple radius check around impact point OR target check)
+		-- Re-check target is valid
+		local character = target.Character
+		if not character then
+			return
+		end
+		local targetRoot = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Root")
+		if not targetRoot then
+			return
+		end
+
+		-- Check distance to IMPACT point
+		local distToImpact = (targetRoot.Position - impactPos).Magnitude
+
+		-- Fallback: Also check direct distance if they are hugging the enemy
+		local distToEnemy = (targetRoot.Position - enemyData.RootPart.Position).Magnitude
+
+		if distToImpact > hitRadius and distToEnemy > (config.AttackRange or 5) + 2 then
+			return -- Missed
+		end
+
+		-- 5. Deal Damage
+		local targetHumanoid = character:FindFirstChildOfClass("Humanoid")
+		if not targetHumanoid or targetHumanoid.Health <= 0 then
+			return
+		end
+
+		-- Check I-frames
+		local iframeExpiry = playerIFrames[target]
+		if iframeExpiry and tick() < iframeExpiry then
+			-- Dodged
+			local damageBlockedRemote = Remotes:GetEvent("DamageBlocked")
+			if damageBlockedRemote then
+				damageBlockedRemote:FireClient(target, {
+					Enemy = enemyData.Model,
+					Position = targetRoot.Position,
+					DamageBlocked = attackDamage,
+				})
+			end
+			return
+		end
+
+		-- Apply Damage
+		local damage = attackDamage
+
+		-- Resistance
+		local resistance = character:GetAttribute("DamageResistance") or 0
+		if resistance > 0 then
+			damage = damage * (1 - math.clamp(resistance, 0, 1))
+		end
+
+		-- Shield
+		local currentShield = character:GetAttribute("Shield") or 0
+		if currentShield > 0 then
+			if currentShield >= damage then
+				character:SetAttribute("Shield", currentShield - damage)
+				damage = 0
+			else
+				damage = damage - currentShield
+				character:SetAttribute("Shield", 0)
+			end
+		end
+
+		if damage > 0 then
+			targetHumanoid:TakeDamage(damage)
+		end
+
+		-- Apply knockback
+		local knockbackDir = (targetRoot.Position - enemyData.RootPart.Position)
+		knockbackDir = Vector3.new(knockbackDir.X, 0.3, knockbackDir.Z).Unit
+		targetRoot.AssemblyLinearVelocity = targetRoot.AssemblyLinearVelocity + knockbackDir * 20
 	end)
 end
 
@@ -466,6 +849,10 @@ local function updateEnemyAI(enemyData: EnemyData, deltaTime: number)
 			enemyData.State = AIState.Chase
 			enemyData.AggroTime = now
 			enemyData.LastPathUpdate = 0 -- Force path recalculation
+			-- Start walk animation
+			if enemyData.WalkTrack and not enemyData.WalkTrack.IsPlaying then
+				enemyData.WalkTrack:Play()
+			end
 		end
 	elseif enemyData.State == AIState.Chase then
 		-- Validate target
@@ -477,26 +864,40 @@ local function updateEnemyAI(enemyData: EnemyData, deltaTime: number)
 			if enemyData.LinearVelocity then
 				enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
 			end
+			-- Stop walk animation
+			if enemyData.WalkTrack and enemyData.WalkTrack.IsPlaying then
+				enemyData.WalkTrack:Stop(0.2)
+			end
 			return
 		end
 
 		-- Check if in attack range
 		local targetPos = getTargetPosition(enemyData.Target)
 		if targetPos then
-			local distance = (targetPos - enemyData.RootPart.Position).Magnitude
+			local distanceToTarget = (targetPos - enemyData.RootPart.Position).Magnitude
+			local distance = distanceToTarget
 			local attackRange = config.AttackRange or 4
+
+			-- DEBUG: Print distance and attack state occasionally
+			if enemyData.EnemyType == "Brute" and math.random() < 0.05 then
+				-- print("[EnemyService][Brute] Dist:", distance, "Range:", attackRange, "Cooldown:", now - enemyData.LastAttackTime)
+			end
 
 			if distance <= attackRange then
 				-- In attack range, switch to attack state
 				if now - enemyData.LastAttackTime >= (config.AttackCooldown or 1.5) then
+					-- print("[EnemyService] Brute entering ATTACK state!")
 					enemyData.State = AIState.Attack
 					enemyData.LastAttackTime = now
 					enemyData.AttackTriggered = false -- Reset attack trigger flag
-					-- Stop movement when attacking
+					-- Stop movement and walk animation when attacking
 					enemyData.IsMoving = false
 					enemyData.LastMoveTarget = nil
 					if enemyData.LinearVelocity then
 						enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+					end
+					if enemyData.WalkTrack and enemyData.WalkTrack.IsPlaying then
+						enemyData.WalkTrack:Stop(0.15)
 					end
 				end
 			else
@@ -513,16 +914,67 @@ local function updateEnemyAI(enemyData: EnemyData, deltaTime: number)
 		-- Perform attack (only once per attack state entry)
 		if not enemyData.AttackTriggered then
 			enemyData.AttackTriggered = true
-			performAttack(enemyData)
-		end
 
-		-- Return to chase after attack duration
-		local attackDuration = config.AttackDuration or 0.6
-		task.delay(attackDuration, function()
-			if enemyData.State == AIState.Attack then
-				enemyData.State = AIState.Chase
+			-- Select attack from Attacks table if available
+			local attackData = nil
+			if config.Attacks then
+				-- Calculate distance for range-filtered attack selection
+				local attackTargetPos = getTargetPosition(enemyData.Target)
+				local atkDist = if attackTargetPos
+					then (attackTargetPos - enemyData.RootPart.Position).Magnitude
+					else nil
+				attackData = pickWeightedAttack(config.Attacks, atkDist)
+				enemyData.CurrentAttack = attackData
+			else
+				enemyData.CurrentAttack = nil
 			end
-		end)
+
+			-- Determine animation ID and duration from attack data or legacy config
+			local animId = if attackData then attackData.AnimationId else config.SlamAnimationId
+			local attackDuration = if attackData then attackData.Duration else (config.AttackDuration or 0.6)
+
+			-- Play animation (protected so it doesn't block attack logic)
+			if animId and enemyData.Animator then
+				local ok, animErr = pcall(function()
+					local animation = Instance.new("Animation")
+					animation.AnimationId = animId
+					local track = enemyData.Animator:LoadAnimation(animation)
+					track.Priority = Enum.AnimationPriority.Action
+					track:Play()
+
+					-- Apply speed curve if defined (e.g. Swing: slow start → fast finish)
+					if attackData and attackData.SpeedCurve then
+						applySpeedCurve(track, attackDuration, attackData.SpeedCurve)
+					end
+				end)
+				if not ok then
+					warn("[EnemyService] Animation error for", enemyData.EnemyType, ":", animErr)
+				end
+			end
+
+			-- Check if this is a leap-type attack (needs special handling)
+			if attackData and attackData.Type == "Leap" then
+				-- Switch to LeapAttack state and run multi-phase attack
+				enemyData.State = AIState.LeapAttack
+				task.spawn(function()
+					performLeapAttack(enemyData)
+				end)
+			else
+				performAttack(enemyData)
+
+				-- Return to chase after attack duration (only schedule once)
+				task.delay(attackDuration, function()
+					if enemyData.State == AIState.Attack then
+						enemyData.State = AIState.Chase
+						enemyData.CurrentAttack = nil
+						-- Resume walk animation
+						if enemyData.WalkTrack and not enemyData.WalkTrack.IsPlaying then
+							enemyData.WalkTrack:Play(0.2)
+						end
+					end
+				end)
+			end
+		end
 	end
 
 	-- Broadcast state change if it happened
@@ -568,6 +1020,11 @@ function EnemyService:ApplyHitstun(enemyModel: Model, duration: number?)
 		-- Reset movement state (stops LinearVelocity from being set)
 		enemyData.IsMoving = false
 		enemyData.LastMoveTarget = nil
+
+		-- Stop walk animation
+		if enemyData.WalkTrack and enemyData.WalkTrack.IsPlaying then
+			enemyData.WalkTrack:Stop(0.1)
+		end
 
 		-- Stop LinearVelocity-driven movement
 		if enemyData.LinearVelocity then
@@ -666,12 +1123,43 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 		rootPart:SetNetworkOwner(nil)
 	end
 
-	-- Apply collision group
+	-- Disable collision + mass on all animated parts to prevent hopping
+	-- Animated limbs pushing against the ground cause bouncing
 	for _, part in enemyModel:GetDescendants() do
 		if part:IsA("BasePart") then
 			part.CollisionGroup = "Enemies"
+			part.CanCollide = false
+			if part ~= rootPart then
+				part.Massless = true
+			end
 		end
 	end
+
+	-- Create invisible collision box from root down to feet
+	-- This keeps the model at the correct height without animated parts interfering
+	local modelCF, modelSize = enemyModel:GetBoundingBox()
+	local feetY = modelCF.Position.Y - modelSize.Y / 2
+	local distToFeet = rootPart.Position.Y - feetY
+	local boxHeight = distToFeet + rootPart.Size.Y * 0.5
+
+	local collisionBox = Instance.new("Part")
+	collisionBox.Name = "GroundCollision"
+	collisionBox.Transparency = 1
+	collisionBox.CanCollide = true
+	collisionBox.CanQuery = false
+	collisionBox.CanTouch = false
+	collisionBox.Massless = true
+	collisionBox.Size = Vector3.new(rootPart.Size.X, boxHeight, rootPart.Size.Z)
+	collisionBox.CollisionGroup = "Enemies"
+	-- Position so box bottom sits at feet level
+	local yOffset = -distToFeet + boxHeight / 2
+	collisionBox.CFrame = rootPart.CFrame * CFrame.new(0, yOffset, 0)
+	collisionBox.Parent = enemyModel
+
+	local collisionWeld = Instance.new("WeldConstraint")
+	collisionWeld.Part0 = rootPart
+	collisionWeld.Part1 = collisionBox
+	collisionWeld.Parent = collisionBox
 
 	-- Setup LinearVelocity for movement (replaces Humanoid:MoveTo)
 	local attachment = rootPart:FindFirstChild("RootAttachment")
@@ -704,10 +1192,10 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 	alignOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
 	alignOrientation.Attachment0 = alignAttachment
 	alignOrientation.CFrame = rootPart.CFrame -- Initial orientation
-	alignOrientation.MaxTorque = 100000 -- Strong enough to stay upright
-	alignOrientation.MaxAngularVelocity = 20
-	alignOrientation.Responsiveness = 40 -- Snappy response
-	alignOrientation.RigidityEnabled = false
+	alignOrientation.MaxTorque = math.huge -- Infinite torque to force it upright
+	alignOrientation.MaxAngularVelocity = math.huge
+	alignOrientation.Responsiveness = 200
+	alignOrientation.RigidityEnabled = true -- Force it to be upright INSTANTLY (no spring)
 	alignOrientation.Parent = rootPart
 
 	-- Setup AnimationController + Animator (replaces Humanoid for animations)
@@ -729,6 +1217,25 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 		existingHumanoid:Destroy()
 	end
 
+	-- Preload walk animation if configured
+	local walkTrack: AnimationTrack? = nil
+	if scaledConfig.WalkAnimationId and animator then
+		local ok, result = pcall(function()
+			local walkAnim = Instance.new("Animation")
+			walkAnim.AnimationId = scaledConfig.WalkAnimationId
+			local track = animator:LoadAnimation(walkAnim)
+			track.Looped = true
+			track.Priority = Enum.AnimationPriority.Movement
+			track:AdjustSpeed(scaledConfig.WalkAnimationSpeed or 1)
+			return track
+		end)
+		if ok then
+			walkTrack = result
+		else
+			warn("[EnemyService] Walk animation error for", typeKey, ":", result)
+		end
+	end
+
 	-- Create enemy data
 	local enemyData: EnemyData = {
 		Model = enemyModel,
@@ -736,6 +1243,7 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 		LinearVelocity = linearVelocity,
 		AlignOrientation = alignOrientation, -- Keep enemy upright + drive rotation
 		Animator = animator,
+		WalkTrack = walkTrack,
 		EnemyType = typeKey,
 		Config = scaledConfig,
 		State = AIState.Idle,
@@ -762,9 +1270,12 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 
 		enemyData.State = AIState.Dead
 
-		-- Stop movement
+		-- Stop movement and animations
 		if enemyData.LinearVelocity then
 			enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+		end
+		if enemyData.WalkTrack and enemyData.WalkTrack.IsPlaying then
+			enemyData.WalkTrack:Stop(0)
 		end
 
 		-- Fire death event
@@ -838,52 +1349,83 @@ function EnemyService:SpawnEnemy(enemyType: string, position: Vector3, parent: I
 		return nil
 	end
 
-	-- Create basic model (NO HUMANOID)
-	-- In production, you'd clone from a prefab in ReplicatedStorage
-	local enemyModel = Instance.new("Model")
-	enemyModel.Name = enemyType
+	-- Create basic model
+	-- Priority: Load from Assets -> Fallback to Placeholder
+	local enemyModel: Model? = nil
+	local assetsFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Assets")
+	local enemiesFolder = assetsFolder:FindFirstChild("Enemies")
 
-	-- Create basic parts (placeholder - replace with actual model)
-	local torso = Instance.new("Part")
-	torso.Name = "HumanoidRootPart"
-	torso.Size = Vector3.new(2, 2, 1)
-	torso.Position = position
-	torso.Anchored = false
-	torso.CanCollide = true
-
-	-- Color based on type
-	if enemyType == "Brute" then
-		torso.Color = Color3.fromRGB(200, 50, 50) -- Dark Red
-		torso.Size = Vector3.new(3, 3, 1.5) -- Bigger
-	elseif enemyType == "Shooter" then
-		torso.Color = Color3.fromRGB(200, 200, 50) -- Yellow
-	else
-		torso.Color = Color3.fromRGB(150, 150, 150) -- Grey Minion
+	if enemiesFolder then
+		local asset = enemiesFolder:FindFirstChild(enemyType)
+		if asset then
+			enemyModel = asset:Clone()
+		end
 	end
 
-	torso.Parent = enemyModel
+	if not enemyModel then
+		-- Fallback: Create placeholder model
+		enemyModel = Instance.new("Model")
+		enemyModel.Name = enemyType
 
-	local head = Instance.new("Part")
-	head.Name = "Head"
-	head.Size = Vector3.new(1, 1, 1)
-	head.Position = position + Vector3.new(0, 2, 0)
-	head.Color = torso.Color
-	head.Anchored = false
-	head.CanCollide = false
-	head.Parent = enemyModel
+		-- Create basic parts
+		local torso = Instance.new("Part")
+		torso.Name = "HumanoidRootPart"
+		torso.Size = Vector3.new(2, 2, 1)
+		torso.Position = position
+		torso.Anchored = false
+		torso.CanCollide = true
 
-	-- Weld head to torso
-	local weld = Instance.new("Weld")
-	weld.Part0 = torso
-	weld.Part1 = head
-	weld.C0 = CFrame.new(0, 1.5, 0)
-	weld.Parent = torso
+		-- Color based on type
+		if enemyType == "Brute" then
+			torso.Color = Color3.fromRGB(200, 50, 50) -- Dark Red
+			torso.Size = Vector3.new(3, 3, 1.5) -- Bigger
+		elseif enemyType == "Shooter" then
+			torso.Color = Color3.fromRGB(200, 200, 50) -- Yellow
+		else
+			torso.Color = Color3.fromRGB(150, 150, 150) -- Grey Minion
+		end
 
-	enemyModel.PrimaryPart = torso
+		torso.Parent = enemyModel
+
+		local head = Instance.new("Part")
+		head.Name = "Head"
+		head.Size = Vector3.new(1, 1, 1)
+		head.Position = position + Vector3.new(0, 2, 0)
+		head.Color = torso.Color
+		head.Anchored = false
+		head.CanCollide = false
+		head.Parent = enemyModel
+
+		-- Weld head to torso
+		local weld = Instance.new("Weld")
+		weld.Part0 = torso
+		weld.Part1 = head
+		weld.C0 = CFrame.new(0, 1.5, 0)
+		weld.Parent = torso
+
+		enemyModel.PrimaryPart = torso
+	end
+
 	enemyModel.Parent = parent or workspace
 
+	-- Ensure position is set correctly (especially for loaded models)
+	if enemyModel and enemyModel.PrimaryPart then
+		-- Calculate hip height / spawn offset to prevent spawning in ground
+		local cframe, size = enemyModel:GetBoundingBox()
+		local heightOffset = size.Y / 2 + 1 -- Half height + 1 stud buffer
+
+		-- Raycast down to find ground if we were given a vague position
+		-- (Optional refinement, but for now just offset up)
+
+		enemyModel:PivotTo(CFrame.new(position + Vector3.new(0, heightOffset, 0)))
+	end
+
 	-- Register the enemy (sets up attributes, LinearVelocity, AnimationController)
-	self:RegisterEnemy(enemyModel, enemyType)
+	-- Cast to Model since we know it's not nil here (or we returned early/handled it)
+	-- But to be safe for the type checker:
+	if enemyModel then
+		self:RegisterEnemy(enemyModel, enemyType)
+	end
 
 	return enemyModel
 end
@@ -952,8 +1494,8 @@ function EnemyService:Start()
 					playerIFrames[player] = now + dashConfig.IFrameDuration + 0.1 -- 0.1s grace for latency
 				end
 			else
-				-- Client ended dash normally
-				playerIFrames[player] = nil
+				-- Don't clear i-frames early — let them expire naturally via timestamp
+				-- Clearing here killed i-frames before slow attacks (like Brute slam) landed
 			end
 		end)
 	end

@@ -65,17 +65,68 @@ return {
         ]]
 		Brute = {
 			Health = 100,
-			WalkSpeed = 10, -- Much slower
+			WalkSpeed = 6, -- Much slower (was 10)
 			Damage = 15,
 
 			AggroRange = 60, -- Detection range (heavy but aware)
-			AttackRange = 5,
-			AttackCooldown = 2.5,
-			AttackWindup = 0.6, -- Slower windup, telegraphed
-			AttackDuration = 1.0,
+			AttackRange = 24, -- Starts attacking as soon as player is near
+			AttackCooldown = 2.0,
+			AttackWindup = 0.57, -- Fallback windup
+			AttackDuration = 1.0, -- Fallback duration
+
+			-- Animation
+			WalkAnimationId = "rbxassetid://71794393488663",
+			WalkAnimationSpeed = 0.5,
+			SlamAnimationId = "rbxassetid://119288108301982", -- Fallback for non-Attacks path
+
+			-- Multi-attack system
+			Attacks = {
+				{
+					Name = "Slam",
+					AnimationId = "rbxassetid://119288108301982",
+					Windup = 0.57,
+					Duration = 1.0,
+					Damage = 15,
+					ForwardDist = 13,
+					HitRadius = 22,
+					VFXType = "Slam",
+					Weight = 1,
+				},
+				{
+					Name = "Swing",
+					AnimationId = "rbxassetid://76517082093663",
+					Windup = 0.35,
+					Duration = 0.7,
+					Damage = 12,
+					ForwardDist = 8,
+					HitRadius = 16,
+					VFXType = "Swing",
+					Weight = 1,
+					SpeedCurve = { { 0, 0.4 }, { 0.3, 0.6 }, { 0.7, 1.0 }, { 1.0, 1.5 } },
+				},
+				{
+					Name = "LeapSlam",
+					Type = "Leap", -- Flag for special multi-phase handling
+					WindupAnimId = "rbxassetid://135955258792126",
+					MidairAnimId = "rbxassetid://126352869640651",
+					LandAnimId = "rbxassetid://119288108301982",
+					WindupDuration = 1.2, -- Slow, dramatic crouch
+					WindupAnimSpeed = 0.4, -- Very slow animation at start
+					FlightDuration = 0.6, -- Time in the air
+					FlightHeight = 25, -- Studs above ground at peak
+					LandDuration = 0.8, -- Recovery after landing
+					Damage = 25, -- Big damage for landing
+					HitRadius = 20, -- Landing slam AoE
+					ForwardDist = 0, -- Damage centered on landing spot
+					VFXType = "LeapSlam",
+					Weight = 0.5, -- Less frequent than normal attacks
+					MinRange = 20, -- Only use when far from target
+					MaxRange = 60, -- Don't leap if too far
+				},
+			},
 
 			ChaseSpeedMultiplier = 0.8,
-			StopDistanceFromTarget = 3,
+			StopDistanceFromTarget = 8, -- Stop further away so he doesn't clip inside
 
 			HitstunDuration = 0.1, -- Harder to stagger
 			KnockbackResistance = 0.5, -- 50% knockback reduction
@@ -83,7 +134,7 @@ return {
 			XPValue = 20,
 			DropChance = 0.25,
 
-			HealthBarOffset = Vector3.new(0, 4, 0),
+			HealthBarOffset = Vector3.new(0, 9, 0),
 			NameDisplayed = true,
 		},
 
@@ -128,7 +179,7 @@ return {
 		MinSpawnDistance = 25, -- Minimum distance from players to spawn
 		MaxSpawnDistance = 70, -- Maximum distance (within aggro range)
 		DespawnDistance = 150, -- Distance at which enemies despawn (increased to match chase range)
-		RespawnDelay = 10, -- Seconds before spawn point can spawn again
+		RespawnDelay = 15, -- Seconds before spawn point can spawn again (was 10)
 	},
 
 	-- Death settings

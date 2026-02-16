@@ -316,6 +316,12 @@ function AttackVFXPlayer:Play(
 		self:PlaySlam(position, damage, configOverride)
 	elseif vfxType == "Swing" then
 		self:PlaySwing(position, damage, enemyModel, configOverride)
+	elseif vfxType == "LeapStart" then
+		-- Wind-up VFX: reuses slam renderer with the LeapStart config (dust + small crack)
+		self:PlaySlam(position, damage, configOverride or AttackVFXConfig.LeapStart)
+	elseif vfxType == "LeapSlam" then
+		-- Enhanced landing slam: reuses slam renderer with bigger LeapSlam config
+		self:PlaySlam(position, damage, configOverride or AttackVFXConfig.LeapSlam)
 	else
 		warn("[AttackVFXPlayer] Unknown VFX type: " .. tostring(vfxType))
 	end
