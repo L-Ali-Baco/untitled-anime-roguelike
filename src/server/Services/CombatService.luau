@@ -636,17 +636,31 @@ function CombatService:Start()
 	-- OPTIMIZATION: Batch cleanup operations to reduce scheduler overhead
 	RunService.Heartbeat:Connect(function()
 		local now = tick()
-		-- Process queue from the start (oldest entries first)
-		while #activeAttacks > 0 do
-			local entry = activeAttacks[1]
+		local removeCount = 0
+
+		-- Count how many items to remove (oldest are at the start)
+		for _, entry in activeAttacks do
 			if now >= entry.expiry then
-				-- Remove the attack hit tracking data
+				-- Cleanup hit tracking data
 				attackHitTargets[entry.id] = nil
-				-- Remove from queue
-				table.remove(activeAttacks, 1)
+				removeCount += 1
 			else
-				-- If oldest entry hasn't expired, newer ones won't either
+				-- Queue is ordered by time, so we can stop early
 				break
+			end
+		end
+
+		-- Batch remove if needed
+		if removeCount > 0 then
+			local count = #activeAttacks
+			-- Shift remaining elements to the start (O(n) copy instead of O(k*n) shifts)
+			if removeCount < count then
+				table.move(activeAttacks, removeCount + 1, count, 1)
+			end
+
+			-- Clear the now-stale tail elements
+			for i = count - removeCount + 1, count do
+				activeAttacks[i] = nil
 			end
 		end
 	end)
