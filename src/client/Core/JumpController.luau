@@ -183,7 +183,7 @@ local function performAirJump()
 	-- Check stamina
 	local staminaCost = StaminaConfig.Costs.AirJump
 	if not StaminaController:HasStamina(staminaCost) then
-		-- TODO: Play "no stamina" feedback
+		StaminaController:TriggerActionFailed("AirJump")
 		return
 	end
 
