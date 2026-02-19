@@ -10,37 +10,9 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
 local StatLib = require(Shared:WaitForChild("Lib"):WaitForChild("StatLib"))
 local EnemyLib = require(Shared:WaitForChild("Lib"):WaitForChild("EnemyLib"))
+local CombatLib = require(Shared:WaitForChild("Lib"):WaitForChild("CombatLib"))
 
 local VanguardSkills = {}
-
--- Helper to find enemies
-local function getEnemiesInRadius(position: Vector3, radius: number): { Model }
-	local enemies = {}
-	local overlapParams = OverlapParams.new()
-	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-	overlapParams.FilterDescendantsInstances = {} -- Exclude nothing initially (we filter later)
-
-	local parts = workspace:GetPartBoundsInRadius(position, radius, overlapParams)
-	local checked = {}
-
-	for _, part in parts do
-		local model = part:FindFirstAncestorOfClass("Model")
-		if model and not checked[model] then
-			checked[model] = true
-			if
-				CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag)
-				or CollectionService:HasTag(model, "TrainingDummy")
-			then
-				if EnemyLib:IsAlive(model) then
-					table.insert(enemies, model)
-				end
-			end
-		end
-	end
-
-	return enemies
-end
-
 --[[
     Iron Will (M2)
     Gain Shield + Damage Buff
@@ -104,7 +76,7 @@ function VanguardSkills.SeismicSlam(player: Player, skillData: any)
 	local damageStat = StatLib:GetStat(player, "Damage", baseDamage)
 	local totalDamage = damageStat * damageMult
 
-	local enemies = getEnemiesInRadius(rootPart.Position, radius)
+	local enemies = CombatLib.getEnemiesInRadius(rootPart.Position, radius)
 	print("[VanguardSkills] Seismic Slam found", #enemies, "enemies")
 
 	for _, enemy in enemies do
@@ -171,7 +143,7 @@ function VanguardSkills.BladeStorm(player: Player, skillData: any)
 
 			-- Cone Check
 			local forward = rootPart.CFrame.LookVector
-			local enemies = getEnemiesInRadius(rootPart.Position, 20) -- Increased Range (was 15)
+			local enemies = CombatLib.getEnemiesInRadius(rootPart.Position, 20) -- Increased Range (was 15)
 
 			for _, enemy in enemies do
 				local enemyPos = enemy:GetPivot().Position

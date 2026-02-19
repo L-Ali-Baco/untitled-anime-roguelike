@@ -8,6 +8,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
 local StatLib = require(Shared:WaitForChild("Lib"):WaitForChild("StatLib"))
 local EnemyLib = require(Shared:WaitForChild("Lib"):WaitForChild("EnemyLib"))
+local CombatLib = require(Shared:WaitForChild("Lib"):WaitForChild("CombatLib"))
 
 local GunslingerSkills = {}
 
@@ -103,35 +104,19 @@ function GunslingerSkills.TetherMine(player: Player, skillData: any)
 		local center = mine.Position
 
 		-- Find enemies
-		-- (Reuse getEnemiesInRadius logic or copy paste for now)
-		local overlapParams = OverlapParams.new()
-		overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-		overlapParams.FilterDescendantsInstances = { character }
-		local parts = workspace:GetPartBoundsInRadius(center, radius, overlapParams)
+		local enemies = CombatLib.getEnemiesInRadius(center, radius, { character })
 
-		local affected = {}
-		for _, part in parts do
-			local model = part:FindFirstAncestorOfClass("Model")
-			if model and not affected[model] then
-				-- Validate target is enemy
-				if
-					CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag)
-					or CollectionService:HasTag(model, "TrainingDummy")
-				then
-					local eRoot = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
-					if EnemyLib:IsAlive(model) and eRoot then
-						affected[model] = true
+		for _, model in enemies do
+			local eRoot = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+			if EnemyLib:IsAlive(model) and eRoot then
+				-- Pull logic
+				local dir = (center - eRoot.Position).Unit
+				eRoot.AssemblyLinearVelocity = dir * pullForce + Vector3.new(0, 10, 0)
 
-						-- Pull logic
-						local dir = (center - eRoot.Position).Unit
-						eRoot.AssemblyLinearVelocity = dir * pullForce + Vector3.new(0, 10, 0)
-
-						-- Damage
-						local baseDamage = 10
-						local damageStat = StatLib:GetStat(player, "Damage", baseDamage)
-						EnemyLib:TakeDamage(model, damageStat * skillData.Damage)
-					end
-				end
+				-- Damage
+				local baseDamage = 10
+				local damageStat = StatLib:GetStat(player, "Damage", baseDamage)
+				EnemyLib:TakeDamage(model, damageStat * skillData.Damage)
 			end
 		end
 

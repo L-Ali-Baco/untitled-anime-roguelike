@@ -18,6 +18,7 @@ local ItemRegistry = require(Shared:WaitForChild("Config"):WaitForChild("ItemReg
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
 local StatLib = require(Shared:WaitForChild("Lib"):WaitForChild("StatLib"))
 local EnemyLib = require(Shared:WaitForChild("Lib"):WaitForChild("EnemyLib"))
+local CombatLib = require(Shared:WaitForChild("Lib"):WaitForChild("CombatLib"))
 
 local ItemService = require(script.Parent.ItemService)
 
@@ -34,35 +35,6 @@ local CombatService = nil -- Circular dependency if required directly? We'll see
 local procCooldowns = {} -- [Player][ProcID] = time
 
 --[[
-    Helper: Get enemies in radius
-]]
-local function getEnemiesInRadius(position: Vector3, radius: number, excludeModel: Model?): { Model }
-	local enemies = {}
-	local overlapParams = OverlapParams.new()
-	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-	overlapParams.FilterDescendantsInstances = { excludeModel }
-
-	local parts = workspace:GetPartBoundsInRadius(position, radius, overlapParams)
-	local checked = {}
-
-	for _, part in parts do
-		local model = part:FindFirstAncestorOfClass("Model")
-		if model and not checked[model] then
-			checked[model] = true
-			if EnemyLib:IsAlive(model) then
-				if
-					CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag)
-					or CollectionService:HasTag(model, "TrainingDummy")
-				then
-					table.insert(enemies, model)
-				end
-			end
-		end
-	end
-
-	return enemies
-end
-
 --[[
     Effect: Chain Lightning (Static Filament)
 ]]
@@ -74,12 +46,11 @@ local function triggerChainLightning(
 	inventory: { [string]: number }?
 )
 	local damageMult = procData.Damage * stackCount
-
 	-- Fetch player's dynamic base damage from StatLib
 	local baseDamage = StatLib:GetStat(attacker, "Damage", 10, inventory) * (CombatConfig.Server.DamageMultiplier or 1)
 
 	local radius = procData.Radius or 20
-	local enemies = getEnemiesInRadius(primaryTarget:GetPivot().Position, radius, primaryTarget)
+	local enemies = CombatLib.getEnemiesInRadius(primaryTarget:GetPivot().Position, radius, { primaryTarget })
 
 	-- Pick random targets (limit 3 for now)
 	local chainCount = 0
@@ -113,12 +84,11 @@ local function triggerExplosion(
 )
 	local radius = procData.Radius + (5 * (stackCount - 1)) -- Scaling radius
 	local damageMult = procData.Damage * stackCount
-
 	-- Fetch player's dynamic base damage from StatLib
 	local baseDamage = StatLib:GetStat(attacker, "Damage", 10, inventory) * (CombatConfig.Server.DamageMultiplier or 1)
 
 	local pos = deadTarget:GetPivot().Position
-	local enemies = getEnemiesInRadius(pos, radius, deadTarget)
+	local enemies = CombatLib.getEnemiesInRadius(pos, radius, { deadTarget })
 
 	for _, enemy in enemies do
 		EnemyLib:TakeDamage(enemy, baseDamage * damageMult)
