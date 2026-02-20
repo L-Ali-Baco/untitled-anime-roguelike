@@ -9,6 +9,11 @@ local RunService = game:GetService("RunService")
 
 local Remotes = {}
 
+-- Cache for folder and remotes
+local folderCache: Folder? = nil
+local eventCache: { [string]: RemoteEvent } = {}
+local functionCache: { [string]: RemoteFunction } = {}
+
 -- Remote names
 local REMOTE_EVENTS = {
 	-- Combat (Melee)
@@ -65,8 +70,15 @@ local REMOTE_FUNCTIONS = {
     Initialize remotes (call from server)
 ]]
 function Remotes:InitServer()
+	-- Check for existing folder to ensure idempotency
+	local folder = ReplicatedStorage:FindFirstChild("Remotes")
+	if folder then
+		folderCache = folder
+		return folder
+	end
+
 	-- Create Remotes folder
-	local folder = Instance.new("Folder")
+	folder = Instance.new("Folder")
 	folder.Name = "Remotes"
 
 	-- Create RemoteEvents
@@ -84,6 +96,7 @@ function Remotes:InitServer()
 	end
 
 	folder.Parent = ReplicatedStorage
+	folderCache = folder
 
 	print("[Remotes] Server initialized")
 	return folder
@@ -93,14 +106,23 @@ end
     Get remotes folder (wait for it on client)
 ]]
 function Remotes:GetFolder()
+	if folderCache then
+		return folderCache
+	end
+
 	if RunService:IsServer() then
 		local folder = ReplicatedStorage:FindFirstChild("Remotes")
 		if not folder then
-			folder = self:InitServer()
+			return self:InitServer()
 		end
+		folderCache = folder
 		return folder
 	else
-		return ReplicatedStorage:WaitForChild("Remotes", 10)
+		local folder = ReplicatedStorage:WaitForChild("Remotes", 10)
+		if folder then
+			folderCache = folder
+		end
+		return folder
 	end
 end
 
@@ -108,9 +130,18 @@ end
     Get a specific remote event
 ]]
 function Remotes:GetEvent(name: string): RemoteEvent?
+	local cached = eventCache[name]
+	if cached then
+		return cached
+	end
+
 	local folder = self:GetFolder()
 	if folder then
-		return folder:FindFirstChild(name)
+		local remote = folder:FindFirstChild(name)
+		if remote and remote:IsA("RemoteEvent") then
+			eventCache[name] = remote
+			return remote
+		end
 	end
 	return nil
 end
@@ -119,9 +150,18 @@ end
     Get a specific remote function
 ]]
 function Remotes:GetFunction(name: string): RemoteFunction?
+	local cached = functionCache[name]
+	if cached then
+		return cached
+	end
+
 	local folder = self:GetFolder()
 	if folder then
-		return folder:FindFirstChild(name)
+		local remote = folder:FindFirstChild(name)
+		if remote and remote:IsA("RemoteFunction") then
+			functionCache[name] = remote
+			return remote
+		end
 	end
 	return nil
 end
