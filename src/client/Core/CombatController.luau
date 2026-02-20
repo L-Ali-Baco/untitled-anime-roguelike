@@ -13,6 +13,7 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 
 local Signal = require(ReplicatedStorage.Packages.Signal)
@@ -661,11 +662,22 @@ local function performRangedAttack()
 				MovementController:SetTargetRotationDuration(dirToTarget, 0.5)
 			end
 		else
-			aimDirection = rootPart.CFrame.LookVector
+			-- Fallback if target lost mid-frame
+			local camLook = Workspace.CurrentCamera.CFrame.LookVector
+			aimDirection = Vector3.new(camLook.X, 0, camLook.Z).Unit
+
+			if MovementController then
+				MovementController:SetTargetRotationDuration(aimDirection, 0.5)
+			end
 		end
 	else
-		-- No target - shoot forward
-		aimDirection = rootPart.CFrame.LookVector
+		-- No target - shoot forward based on camera
+		local camLook = Workspace.CurrentCamera.CFrame.LookVector
+		aimDirection = Vector3.new(camLook.X, 0, camLook.Z).Unit
+
+		if MovementController then
+			MovementController:SetTargetRotationDuration(aimDirection, 0.5)
+		end
 	end
 
 	-- Apply spread
