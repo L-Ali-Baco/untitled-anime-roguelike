@@ -2,7 +2,7 @@
     CombatController.luau
     Main combat state machine handling:
     - 3-hit combo system with auto-attack on hold (Melee/Warrior)
-    - Rapid-fire auto-aim ranged attacks (Ranged/Gunner)
+    - Rapid-fire auto-aim ranged attacks (Ranged/Scrapper)
     - Hitbox spawning and collision detection
     - Integration with VFX (hitstop, screen shake, effects)
     - Server communication for damage
@@ -14,7 +14,6 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local Debris = game:GetService("Debris")
 
 local Signal = require(ReplicatedStorage.Packages.Signal)
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
@@ -108,9 +107,6 @@ local hitEnemiesThisSwing: { [Model]: boolean } = {}
 
 -- Attack ID counter for unique attack identification
 local attackIdCounter = 0
-
--- Store attack direction for hitbox placement
-local currentAttackDirection: Vector3? = nil
 
 -- Original walk speed (to restore after attack)
 local originalWalkSpeed = MovementConfig.WalkSpeed
@@ -271,7 +267,7 @@ local function processHits(hitTargets: { Model }, attackData: any, comboHit: num
 		return
 	end
 
-	local character, humanoid, rootPart = getCharacterParts()
+	local _, _, rootPart = getCharacterParts()
 	if not rootPart then
 		return
 	end
@@ -396,9 +392,10 @@ local function performAttack(comboHit: number)
 		local dirToTarget = TargetingController:GetDirectionToTarget()
 		if dirToTarget and targetPos then
 			attackDir = dirToTarget
-			-- Rotate character to face target
-			local targetCFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + dirToTarget)
-			rootPart.CFrame = CFrame.new(rootPart.Position) * targetCFrame.Rotation
+			-- Rotate character to face target using MovementController
+			if MovementController then
+				MovementController:SetTargetRotationDuration(dirToTarget, attackData.Duration)
+			end
 		else
 			attackDir = rootPart.CFrame.LookVector
 			attackDir = Vector3.new(attackDir.X, 0, attackDir.Z).Unit
@@ -408,9 +405,6 @@ local function performAttack(comboHit: number)
 		attackDir = rootPart.CFrame.LookVector
 		attackDir = Vector3.new(attackDir.X, 0, attackDir.Z).Unit
 	end
-
-	-- Store attack direction for hitbox
-	currentAttackDirection = attackDir
 
 	-- Update state
 	MovementController:SetState(CharacterState.Attacking)
@@ -470,7 +464,6 @@ local function performAttack(comboHit: number)
 		end
 
 		isAttacking = false
-		currentAttackDirection = nil
 		CombatController.OnAttackEnded:Fire(comboHit)
 
 		-- Restore walk speed
@@ -654,20 +647,18 @@ local function performRangedAttack()
 
 	-- Determine aim direction
 	local aimDirection: Vector3
-	local targetModel: Model? = nil
 	local targetPosition: Vector3? = nil
 
 	if TargetingController and TargetingController:HasTarget() then
 		targetPosition = TargetingController:GetTargetPosition()
-		targetModel = TargetingController:GetTarget()
 		if targetPosition then
 			aimDirection = (targetPosition - muzzlePos).Unit
 
 			-- Rotate character to face target
 			local dirToTarget = TargetingController:GetDirectionToTarget()
-			if dirToTarget then
-				local targetCFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + dirToTarget)
-				rootPart.CFrame = CFrame.new(rootPart.Position) * targetCFrame.Rotation
+			if dirToTarget and MovementController then
+				-- Override for 0.5s so rapid fire keeps you facing the enemy smoothly
+				MovementController:SetTargetRotationDuration(dirToTarget, 0.5)
 			end
 		else
 			aimDirection = rootPart.CFrame.LookVector

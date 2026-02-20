@@ -4,8 +4,7 @@
 ]]
 
 return {
-	-- Default class list (order matters for UI)
-	ClassOrder = { "Vanguard", "Gunner", "BikerKing" },
+	ClassOrder = { "Vanguard", "Scrapper", "BikerKing" },
 
 	-- Vanguard: Heavy melee fighter with custom character model
 	Vanguard = {
@@ -33,16 +32,29 @@ return {
 		FacingOffset = 180, -- Rotate model 180 degrees to face forward correctly
 	},
 
-	-- Gunner: Ranged fighter with rapid-fire bullets
-	Gunner = {
-		DisplayName = "Gunner",
+	-- Scrapper: Ranged fighter with rapid-fire bullets
+	Scrapper = {
+		DisplayName = "Scrapper",
 		Description = "Ranged fighter with rapid-fire auto-aim bullets",
 		Icon = "rbxassetid://6031075929", -- Gun icon
 		Color = Color3.fromRGB(80, 180, 255), -- Blue
 
 		AttackType = "Ranged",
 		BaseHealth = 80,
-		MoveSpeedMultiplier = 1.1, -- Slightly faster
+		MoveSpeedMultiplier = 1.5, -- Slightly faster
+
+		-- Custom character model settings
+		CustomModel = "Scrapper", -- Model name in ReplicatedStorage
+		RootPartName = "HumanoidRootPart",
+		IsCustomRig = true,
+		RunAnimationId = "rbxassetid://121385287087380",
+		RunShootAnimationId = "rbxassetid://82394544656350",
+		HipHeight = 5.0, -- Defaulting to 2.0, may need tuning based on model
+		FacingOffset = 90, -- Fix character facing 9-oclock when running forward
+
+		-- Custom weapon attachment
+		WeaponModel = "ScrapperG",
+		WeaponBone = "Hand.R",
 
 		-- Range for enemy highlight (matches Server/Targeting limits)
 		HighlightRange = 40,
@@ -95,27 +107,27 @@ return {
 		CustomModel = "BikerKingRig",
 		RootPartName = "HumanoidRootPart",
 		IsCustomRig = true,
-		HipHeight = 5.0, -- Raised to prevent sinking into the floor
+		HipHeight = 8.0, -- Raised to prevent sinking into the floor
 		FacingOffset = 180,
 		RunAnimationId = "rbxassetid://0", -- Placeholder until real anim
 		IdleAnimationId = "rbxassetid://0", -- Placeholder until real anim
 
 		-- Flamethrower config (hold to fire)
 		FlamethrowerAttack = {
-			TickRate = 0.08,     -- Damage every 0.08s (~12 hits/sec)
-			Damage = 3,          -- 36 DPS base (plus stat scaling)
-			Range = 35,          -- Extended range
-			ConeAngle = 45,      -- Wider fan
+			TickRate = 0.08, -- Damage every 0.08s (~12 hits/sec)
+			Damage = 3, -- 36 DPS base (plus stat scaling)
+			Range = 35, -- Extended range
+			ConeAngle = 45, -- Wider fan
 			WalkSpeedMultiplier = 0.6,
-			
+
 			-- Hybrid VFX Settings (Voxels + Strays)
 			-- 1. Voxels (The Main Volume - Thick & Stylized)
 			VoxelEnabled = true,
 			VoxelCountPerFrame = 6, -- Increased for thickness and turbulence
-			CubeStartSize = 1.0,    -- Thicker start
-			CubeEndSize = 5.0,      -- Massive expansion for volume
-			FlameSpeed = 45,        -- Base speed
-			
+			CubeStartSize = 1.0, -- Thicker start
+			CubeEndSize = 5.0, -- Massive expansion for volume
+			FlameSpeed = 45, -- Base speed
+
 			-- 2. Strays (Chaotic Embers/Sparks)
 			StraysEnabled = true,
 			StrayCountPerFrame = 3,
@@ -123,7 +135,7 @@ return {
 			StraySpread = 1.2,
 			StraySize = 0.3,
 			StrayLifetime = 0.35,
-			
+
 			LightBrightness = 6,
 			LightRange = 25,
 		},

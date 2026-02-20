@@ -27,12 +27,15 @@ local currentState = CharacterState.Idle
 local isGrounded = true
 local lastGroundedTime = 0
 
--- Custom rig state
 local isCustomRig = false
 local linearVelocityConstraint: LinearVelocity? = nil
 local alignOrientationConstraint: AlignOrientation? = nil
 local facingOffsetRadians = 0 -- Offset in radians to correct model facing direction
 local currentYAngle = 0 -- Current Y rotation angle for smooth interpolation
+
+-- Target Rotation Override
+local targetRotationOverride: Vector3? = nil
+local targetRotationExpireTime = 0
 
 -- Connections
 local connections: { RBXScriptConnection } = {}
@@ -368,13 +371,28 @@ local function onHeartbeat(deltaTime: number)
 		applyStandardMovement(humanoid, rootPart, worldDirection, deltaTime)
 	end
 
-	-- Rotate character to face movement direction
-	if isMoving and isGrounded then
+	-- Check override
+	if targetRotationOverride and os.clock() > targetRotationExpireTime then
+		targetRotationOverride = nil
+	end
+
+	-- Rotate character to face movement direction or override direction
+	if targetRotationOverride then
+		rotateCharacter(rootPart, targetRotationOverride, deltaTime)
+	elseif isMoving and isGrounded then
 		rotateCharacter(rootPart, worldDirection, deltaTime)
 	end
 end
 
 -- Public API --
+
+--[[
+    Force the character to face a specific direction for a set duration
+]]
+function MovementController:SetTargetRotationDuration(direction: Vector3, duration: number)
+	targetRotationOverride = direction
+	targetRotationExpireTime = os.clock() + duration
+end
 
 --[[
     Get current character state

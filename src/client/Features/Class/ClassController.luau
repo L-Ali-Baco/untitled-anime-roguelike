@@ -25,6 +25,8 @@ local classData: any = nil
 -- Animation state for custom rigs
 local currentIdleTrack: AnimationTrack? = nil
 local currentRunTrack: AnimationTrack? = nil
+local currentRunShootTrack: AnimationTrack? = nil
+local lastShootTime = 0
 local animationConnections: { RBXScriptConnection } = {}
 
 -- Signals
@@ -125,7 +127,7 @@ function ClassController:GetMeleeAttackData(comboHit: number): any
 end
 
 --[[
-    Get ranged attack config (for Gunner)
+    Get ranged attack config (for Scrapper)
 ]]
 function ClassController:GetRangedAttackData(): any
 	if classData and classData.RangedAttack then
@@ -150,6 +152,11 @@ local function cleanupAnimations()
 		currentRunTrack:Stop(0.2)
 		currentRunTrack:Destroy()
 		currentRunTrack = nil
+	end
+	if currentRunShootTrack then
+		currentRunShootTrack:Stop(0.2)
+		currentRunShootTrack:Destroy()
+		currentRunShootTrack = nil
 	end
 
 	-- Disconnect animation connections
@@ -182,6 +189,11 @@ local function setupCustomCharacterAnimations(character: Model)
 	local runAnimationId = character:GetAttribute("RunAnimationId")
 	if not runAnimationId and classData and classData.RunAnimationId then
 		runAnimationId = classData.RunAnimationId
+	end
+
+	local runShootAnimationId = character:GetAttribute("RunShootAnimationId")
+	if not runShootAnimationId and classData and classData.RunShootAnimationId then
+		runShootAnimationId = classData.RunShootAnimationId
 	end
 
 	-- Wait for humanoid
@@ -240,6 +252,30 @@ local function setupCustomCharacterAnimations(character: Model)
 		runAnimation:Destroy()
 	end
 
+	-- Load Run-Shoot Animation
+	if runShootAnimationId then
+		local runShootAnimation = Instance.new("Animation")
+		runShootAnimation.AnimationId = runShootAnimationId
+
+		local success, track = pcall(function()
+			return animator:LoadAnimation(runShootAnimation)
+		end)
+
+		if success and track then
+			track.Priority = Enum.AnimationPriority.Movement
+			track.Looped = true
+			currentRunShootTrack = track
+		end
+		runShootAnimation:Destroy()
+	end
+
+	-- Listen for shots to trigger RunShoot
+	local CombatController = require(script.Parent.Parent.Parent.Core.CombatController)
+	local shootConnection = CombatController.OnRangedFired:Connect(function()
+		lastShootTime = os.clock()
+	end)
+	table.insert(animationConnections, shootConnection)
+
 	-- Handle animation state switching
 	local function updateAnimations()
 		if not rootPart then
@@ -253,21 +289,49 @@ local function setupCustomCharacterAnimations(character: Model)
 		-- Threshold for "moving"
 		local isMoving = speed > 0.5
 
+		local timeSinceShot = os.clock() - lastShootTime
+		local isShooting = timeSinceShot < 0.3 -- Keep animation playing shortly after firing
+
 		if isMoving then
-			-- Play Run, Stop Idle
-			if currentRunTrack and not currentRunTrack.IsPlaying then
-				currentRunTrack:Play(0.2)
+			local playbackSpeed = math.max(0.5, speed / 16)
+
+			if isShooting and currentRunShootTrack then
+				-- Play RunShoot, Stop Run, Stop Idle
+				if not currentRunShootTrack.IsPlaying then
+					currentRunShootTrack:Play(0.1)
+				end
+				currentRunShootTrack:AdjustSpeed(playbackSpeed)
+
+				if currentRunTrack and currentRunTrack.IsPlaying then
+					currentRunTrack:Stop(0.1)
+				end
+			else
+				-- Play Run, Stop RunShoot, Stop Idle
+				if currentRunTrack then
+					if not currentRunTrack.IsPlaying then
+						currentRunTrack:Play(0.2)
+					end
+					currentRunTrack:AdjustSpeed(playbackSpeed)
+				end
+
+				if currentRunShootTrack and currentRunShootTrack.IsPlaying then
+					currentRunShootTrack:Stop(0.2)
+				end
 			end
+
 			if currentIdleTrack and currentIdleTrack.IsPlaying then
 				currentIdleTrack:Stop(0.2)
 			end
 		else
-			-- Play Idle, Stop Run
+			-- Play Idle, Stop Run, Stop RunShoot
 			if currentIdleTrack and not currentIdleTrack.IsPlaying then
 				currentIdleTrack:Play(0.2)
 			end
 			if currentRunTrack and currentRunTrack.IsPlaying then
 				currentRunTrack:Stop(0.2)
+			end
+			if currentRunShootTrack and currentRunShootTrack.IsPlaying then
+				currentRunShootTrack:Stop(0.2)
 			end
 		end
 	end
@@ -309,7 +373,7 @@ end
     Get all available classes for UI
 ]]
 function ClassController:GetAvailableClasses(): { string }
-	return ClassConfig.ClassOrder or { "Warrior", "Gunner" }
+	return ClassConfig.ClassOrder or { "Warrior", "Scrapper" }
 end
 
 --[[
