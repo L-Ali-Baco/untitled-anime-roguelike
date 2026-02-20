@@ -638,29 +638,30 @@ function CombatService:Start()
 		local now = tick()
 		local removeCount = 0
 
-		-- Count how many items to remove (oldest are at the start)
-		for _, entry in activeAttacks do
+		-- Count how many items to remove (FIFO)
+		for _, entry in ipairs(activeAttacks) do
 			if now >= entry.expiry then
 				-- Cleanup hit tracking data
 				attackHitTargets[entry.id] = nil
 				removeCount += 1
 			else
-				-- Queue is ordered by time, so we can stop early
+				-- If oldest entry hasn't expired, newer ones won't either (assuming FIFO insertion)
 				break
 			end
 		end
 
-		-- Batch remove if needed
 		if removeCount > 0 then
-			local count = #activeAttacks
-			-- Shift remaining elements to the start (O(n) copy instead of O(k*n) shifts)
-			if removeCount < count then
-				table.move(activeAttacks, removeCount + 1, count, 1)
-			end
-
-			-- Clear the now-stale tail elements
-			for i = count - removeCount + 1, count do
-				activeAttacks[i] = nil
+			local newSize = #activeAttacks - removeCount
+			if newSize > 0 then
+				-- Shift remaining items to the front (O(n) instead of O(k*n))
+				table.move(activeAttacks, removeCount + 1, #activeAttacks, 1)
+				-- Clear the old slots at the end
+				for i = newSize + 1, #activeAttacks do
+					activeAttacks[i] = nil
+				end
+			else
+				-- List is empty, just clear it
+				table.clear(activeAttacks)
 			end
 		end
 	end)
