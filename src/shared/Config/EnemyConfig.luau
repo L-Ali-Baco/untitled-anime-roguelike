@@ -1,15 +1,9 @@
---[[
-    EnemyConfig.luau
-    Enemy type definitions and AI behavior parameters.
-    Easy to tweak for balancing without touching code.
-]]
-
-return {
+local Config = {
 	-- AI update settings (server performance)
 	AI = {
 		UpdateRate = 0.05, -- Snappier updates (20 Hz)
-		PathfindingEnabled = true, -- Use PathfindingService (disable for simple direct chase)
-		PathRecalculateInterval = 0.5, -- How often to recalculate path
+		-- PathfindingEnabled = true, -- Removed
+		-- PathRecalculateInterval = 0.5, -- Removed
 		MaxActiveEnemies = 50, -- Cap for performance
 	},
 
@@ -198,3 +192,5 @@ return {
 		MaxMultiplier = 3.0, -- Cap at 3x stats
 	},
 }
+
+return Config
