@@ -175,11 +175,11 @@ local function onRenderStepped(deltaTime: number)
 	if isMoving then
 		-- Calculate bob offsets
 		-- Y bob: double frequency for walking steps (up and down twice per cycle)
-		local bobY = math.sin(bobTime) * 0.12
+		local bobY = math.sin(bobTime) * 0.04
 		-- X bob: side to side sway
-		local bobX = math.cos(bobTime * 0.5) * 0.08
+		local bobX = math.cos(bobTime * 0.5) * 0.02
 		-- Pitch bob: slight camera tilt
-		local bobPitch = math.sin(bobTime) * 0.01
+		local bobPitch = math.sin(bobTime) * 0.005
 
 		-- Apply bobbing relative to camera rotation
 		local bobOffset = targetCF.RightVector * bobX + targetCF.UpVector * bobY
