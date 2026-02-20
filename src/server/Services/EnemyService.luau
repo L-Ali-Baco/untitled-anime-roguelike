@@ -15,7 +15,6 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
-local _PathfindingService = game:GetService("PathfindingService")
 
 -- Wait for shared modules
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -62,10 +61,6 @@ type EnemyData = {
 	State: string,
 	Target: Player?,
 	LastAttackTime: number,
-	LastPathUpdate: number,
-	Path: Path?,
-	PathWaypoints: { PathWaypoint }?,
-	CurrentWaypointIndex: number,
 	HitstunEndTime: number,
 	AggroTime: number, -- When we first saw target
 	IsMoving: boolean, -- Track if currently moving (for hysteresis)
@@ -160,56 +155,6 @@ local function isTargetValid(enemyData: EnemyData): boolean
 
 	return true
 end
-
---[[
-    Update pathfinding for an enemy
-    NOTE: Pathfinding disabled for now - direct movement is smoother on flat terrain
-    Uncomment and call updatePath() in chase state when obstacles are needed
-]]
---[[
-local function updatePath(enemyData: EnemyData)
-	if not enemyData.Target then
-		return
-	end
-
-	local targetPos = getTargetPosition(enemyData.Target)
-	if not targetPos then
-		return
-	end
-
-	local now = tick()
-
-	-- Only recalculate path periodically
-	if now - enemyData.LastPathUpdate < EnemyConfig.AI.PathRecalculateInterval then
-		return
-	end
-	enemyData.LastPathUpdate = now
-
-	-- Create or reuse path
-	if not enemyData.Path then
-		enemyData.Path = PathfindingService:CreatePath({
-			AgentRadius = 2,
-			AgentHeight = 5,
-			AgentCanJump = false,
-			AgentCanClimb = false,
-		})
-	end
-
-	-- Compute path
-	local success, err = pcall(function()
-		enemyData.Path:ComputeAsync(enemyData.RootPart.Position, targetPos)
-	end)
-
-	if success and enemyData.Path.Status == Enum.PathStatus.Success then
-		enemyData.PathWaypoints = enemyData.Path:GetWaypoints()
-		enemyData.CurrentWaypointIndex = 2 -- Skip first waypoint (current position)
-	else
-		-- Pathfinding failed, clear path (will use direct movement)
-		enemyData.PathWaypoints = nil
-		enemyData.CurrentWaypointIndex = 1
-	end
-end
---]]
 
 --[[
     Move enemy toward target using direct movement (simpler and smoother)
@@ -889,7 +834,6 @@ local function updateEnemyAI(enemyData: EnemyData, deltaTime: number)
 			enemyData.Target = nearestPlayer
 			enemyData.State = AIState.Chase
 			enemyData.AggroTime = now
-			enemyData.LastPathUpdate = 0 -- Force path recalculation
 			-- Start walk animation
 			if enemyData.WalkTrack and not enemyData.WalkTrack.IsPlaying then
 				enemyData.WalkTrack:Play()
@@ -1319,10 +1263,6 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 		State = AIState.Idle,
 		Target = nil,
 		LastAttackTime = 0,
-		LastPathUpdate = 0,
-		Path = nil,
-		PathWaypoints = nil,
-		CurrentWaypointIndex = 1,
 		HitstunEndTime = 0,
 		AggroTime = 0,
 		IsMoving = false,
