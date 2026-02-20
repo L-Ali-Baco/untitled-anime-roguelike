@@ -11,13 +11,15 @@ local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatC
 
 local CombatLib = {}
 
+local overlapParams = OverlapParams.new()
+overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+
 --[[
     Finds models with the Enemy tag or TrainingDummy tag within a radius.
 ]]
 function CombatLib.getEnemiesInRadius(position: Vector3, radius: number, excludeList: { Instance }?): { Model }
 	local enemies = {}
-	local overlapParams = OverlapParams.new()
-	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+	-- OPTIMIZATION: Reuse OverlapParams to avoid allocation
 	overlapParams.FilterDescendantsInstances = excludeList or {}
 
 	local parts = workspace:GetPartBoundsInRadius(position, radius, overlapParams)
