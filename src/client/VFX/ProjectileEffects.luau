@@ -1,17 +1,12 @@
 --[[
     ProjectileEffects.luau
     Visual effects for ranged attacks.
-    
-    Features:
-    - Muzzle flash (bright flash at gun position)
-    - Bullet tracer (fast-moving line from gun to hit point)
-    - Hit sparks (small particles on impact)
-    - All effects are client-side only (cosmetic)
+    Refactored to use VFXPool and VFXSystem.
 ]]
 
-local Debris = game:GetService("Debris")
-local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VFXPool = require(script.Parent.VFXPool)
+local VFXSystem = require(script.Parent.VFXSystem)
 
 -- Note: ClassConfig reserved for future VFX customization per class
 local _ = require(ReplicatedStorage.Shared.Config.ClassConfig)
@@ -21,45 +16,77 @@ ProjectileEffects.Name = "ProjectileEffects"
 
 -- Default config (can be overridden per-call)
 local DEFAULT_CONFIG = {
-	-- Muzzle flash
 	MuzzleFlashEnabled = true,
 	MuzzleFlashColor = Color3.fromRGB(255, 200, 100),
 	MuzzleFlashSize = 1.5,
 	MuzzleFlashDuration = 0.05,
 
-	-- Tracer
 	TracerEnabled = true,
 	TracerColor = Color3.fromRGB(255, 220, 100),
 	TracerWidth = 0.15,
 	TracerLifetime = 0.08,
 
-	-- Hit spark
 	HitSparkEnabled = true,
 	HitSparkColor = Color3.fromRGB(255, 150, 50),
 	HitSparkCount = 4,
 }
 
--- VFX folder
-local vfxFolder: Folder? = nil
+-- Templates
+local function getMuzzleFlashTemplate()
+	local part = Instance.new("Part")
+	part.Name = "MuzzleFlash"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Material = Enum.Material.Neon
+	part.Shape = Enum.PartType.Ball
 
---[[
-    Get or create the VFX folder in workspace
-]]
-local function getVFXFolder(): Folder
-	if not vfxFolder or not vfxFolder.Parent then
-		vfxFolder = workspace:FindFirstChild("VFX") :: Folder?
-		if not vfxFolder then
-			vfxFolder = Instance.new("Folder")
-			vfxFolder.Name = "VFX"
-			vfxFolder.Parent = workspace
-		end
-	end
-	return vfxFolder :: Folder
+	local light = Instance.new("PointLight")
+	light.Parent = part
+	return part
 end
 
---[[
-    Get config value with fallback to default
-]]
+local function getTracerTemplate()
+	local part = Instance.new("Part")
+	part.Name = "BulletTracer"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Material = Enum.Material.Neon
+	return part
+end
+
+local function getSparkTemplate()
+	local part = Instance.new("Part")
+	part.Name = "HitSpark"
+	part.Anchored = false
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Material = Enum.Material.Neon
+	part.Shape = Enum.PartType.Ball
+	return part
+end
+
+local function getHitFlashTemplate()
+	local part = Instance.new("Part")
+	part.Name = "HitFlash"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Material = Enum.Material.Neon
+	part.Shape = Enum.PartType.Ball
+	return part
+end
+
+-- Helper
 local function getConfigValue(cfg: any?, key: string): any
 	if cfg and cfg[key] ~= nil then
 		return cfg[key]
@@ -69,155 +96,101 @@ end
 
 --[[
     Create muzzle flash effect
-    @param position: Position to spawn flash
-    @param direction: Direction the gun is pointing
-    @param config: Optional config overrides
 ]]
 function ProjectileEffects:SpawnMuzzleFlash(position: Vector3, direction: Vector3, config: any?)
 	local cfg = config or DEFAULT_CONFIG
-	if not cfg.MuzzleFlashEnabled then
-		return
-	end
+	if not cfg.MuzzleFlashEnabled then return end
 
-	local folder = getVFXFolder()
-
-	-- Create the flash part
-	local flash = Instance.new("Part")
-	flash.Name = "MuzzleFlash"
-	flash.Anchored = true
-	flash.CanCollide = false
-	flash.CanQuery = false
-	flash.CanTouch = false
-	flash.CastShadow = false
-	flash.Material = Enum.Material.Neon
+	local flash = VFXPool:Get("MuzzleFlash", getMuzzleFlashTemplate())
 	flash.Color = cfg.MuzzleFlashColor or DEFAULT_CONFIG.MuzzleFlashColor
 	flash.Size = Vector3.new(cfg.MuzzleFlashSize or 1.5, cfg.MuzzleFlashSize or 1.5, cfg.MuzzleFlashSize or 1.5)
-	flash.Shape = Enum.PartType.Ball
 	flash.CFrame = CFrame.new(position)
 	flash.Transparency = 0.3
-	flash.Parent = folder
+	flash.Parent = workspace
 
-	-- Add point light
-	local light = Instance.new("PointLight")
-	light.Color = cfg.MuzzleFlashColor or DEFAULT_CONFIG.MuzzleFlashColor
-	light.Brightness = 3
-	light.Range = 8
-	light.Parent = flash
+	local light = flash:FindFirstChildOfClass("PointLight")
+	if light then
+		light.Color = flash.Color
+		light.Brightness = 3
+        light.Enabled = true
+	end
 
-	-- Quick fade out
-	local tweenInfo = TweenInfo.new(cfg.MuzzleFlashDuration or 0.05, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local duration = cfg.MuzzleFlashDuration or 0.05
 
-	local tween = TweenService:Create(flash, tweenInfo, {
+	VFXSystem:Add(flash, duration, {
 		Transparency = 1,
-		Size = Vector3.new(0.1, 0.1, 0.1),
+		Size = Vector3.new(0.1, 0.1, 0.1)
+	}, {
+		EasingStyle = Enum.EasingStyle.Quad,
+		PoolName = "MuzzleFlash"
 	})
 
-	local lightTween = TweenService:Create(light, tweenInfo, {
-		Brightness = 0,
-	})
-
-	tween:Play()
-	lightTween:Play()
-
-	Debris:AddItem(flash, (cfg.MuzzleFlashDuration or DEFAULT_CONFIG.MuzzleFlashDuration) + 0.1)
+	if light then
+		VFXSystem:Add(light, duration, {
+			Brightness = 0
+		}, {
+			EasingStyle = Enum.EasingStyle.Quad
+		})
+	end
 end
 
 --[[
     Create bullet tracer effect
-    @param startPos: Where the bullet starts (muzzle)
-    @param endPos: Where the bullet ends (hit point or max range)
-    @param config: Optional config overrides
 ]]
 function ProjectileEffects:SpawnTracer(startPos: Vector3, endPos: Vector3, config: any?)
 	local cfg = config or DEFAULT_CONFIG
-	if not getConfigValue(cfg, "TracerEnabled") then
-		return
-	end
+	if not getConfigValue(cfg, "TracerEnabled") then return end
 
-	local folder = getVFXFolder()
-
-	-- Calculate tracer properties with safety check
 	local diff = endPos - startPos
 	local distance = diff.Magnitude
-	if distance < 0.01 then
-		return
-	end
+	if distance < 0.01 then return end
 
 	local midPoint = (startPos + endPos) / 2
-	local direction = diff.Unit
 
-	-- Create the tracer beam
-	local tracer = Instance.new("Part")
-	tracer.Name = "BulletTracer"
-	tracer.Anchored = true
-	tracer.CanCollide = false
-	tracer.CanQuery = false
-	tracer.CanTouch = false
-	tracer.CastShadow = false
-	tracer.Material = Enum.Material.Neon
+	local tracer = VFXPool:Get("BulletTracer", getTracerTemplate())
 	tracer.Color = cfg.TracerColor or DEFAULT_CONFIG.TracerColor
-
 	local width = cfg.TracerWidth or 0.15
 	tracer.Size = Vector3.new(width, width, distance)
 	tracer.CFrame = CFrame.lookAt(midPoint, endPos)
 	tracer.Transparency = 0
-	tracer.Parent = folder
+	tracer.Parent = workspace
 
-	-- Fade out quickly
 	local lifetime = cfg.TracerLifetime or 0.08
-	local tweenInfo = TweenInfo.new(lifetime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
-	local tween = TweenService:Create(tracer, tweenInfo, {
+	VFXSystem:Add(tracer, lifetime, {
 		Transparency = 1,
-		Size = Vector3.new(0.02, 0.02, distance),
+		Size = Vector3.new(0.02, 0.02, distance)
+	}, {
+		EasingStyle = Enum.EasingStyle.Quad,
+		PoolName = "BulletTracer"
 	})
-
-	tween:Play()
-
-	Debris:AddItem(tracer, lifetime + 0.1)
 end
 
 --[[
     Create hit spark particles
-    @param hitPosition: Where the bullet hit
-    @param hitNormal: Surface normal at hit point (optional)
-    @param config: Optional config overrides
 ]]
 function ProjectileEffects:SpawnHitSparks(hitPosition: Vector3, hitNormal: Vector3?, config: any?)
 	local cfg = config or DEFAULT_CONFIG
-	if not cfg.HitSparkEnabled then
-		return
-	end
+	if not cfg.HitSparkEnabled then return end
 
-	local folder = getVFXFolder()
 	local sparkCount = cfg.HitSparkCount or 4
 	local sparkColor = cfg.HitSparkColor or DEFAULT_CONFIG.HitSparkColor
 
-	-- Create small spark particles
 	for i = 1, sparkCount do
-		local spark = Instance.new("Part")
-		spark.Name = "HitSpark"
-		spark.Anchored = false
-		spark.CanCollide = false
-		spark.CanQuery = false
-		spark.CanTouch = false
-		spark.CastShadow = false
-		spark.Material = Enum.Material.Neon
+		local spark = VFXPool:Get("HitSpark", getSparkTemplate())
 		spark.Color = sparkColor
 		spark.Size = Vector3.new(0.1, 0.1, 0.1)
-		spark.Shape = Enum.PartType.Ball
 		spark.CFrame = CFrame.new(hitPosition)
 		spark.Transparency = 0.3
-		spark.Parent = folder
+		spark.Anchored = false -- Physics needs unanchored
+		spark.Parent = workspace
 
-		-- Random velocity away from hit point
 		local randomDir = Vector3.new(
 			math.random() - 0.5,
-			math.random() * 0.5 + 0.2, -- Bias upward
+			math.random() * 0.5 + 0.2,
 			math.random() - 0.5
 		).Unit
 
-		-- If we have a normal, bias sparks away from surface
 		if hitNormal then
 			randomDir = (randomDir + hitNormal).Unit
 		end
@@ -225,106 +198,64 @@ function ProjectileEffects:SpawnHitSparks(hitPosition: Vector3, hitNormal: Vecto
 		local speed = math.random(15, 30)
 		spark.AssemblyLinearVelocity = randomDir * speed
 
-		-- Fade out
 		local lifetime = 0.15 + math.random() * 0.1
-		local tweenInfo = TweenInfo.new(lifetime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
-		local tween = TweenService:Create(spark, tweenInfo, {
+		VFXSystem:Add(spark, lifetime, {
 			Transparency = 1,
-			Size = Vector3.new(0.02, 0.02, 0.02),
+			Size = Vector3.new(0.02, 0.02, 0.02)
+		}, {
+			EasingStyle = Enum.EasingStyle.Quad,
+			PoolName = "HitSpark"
 		})
-
-		tween:Play()
-
-		Debris:AddItem(spark, lifetime + 0.1)
 	end
 
-	-- Add a brief flash at hit point
-	local flash = Instance.new("Part")
-	flash.Name = "HitFlash"
-	flash.Anchored = true
-	flash.CanCollide = false
-	flash.CanQuery = false
-	flash.CanTouch = false
-	flash.CastShadow = false
-	flash.Material = Enum.Material.Neon
+	-- Flash
+	local flash = VFXPool:Get("HitFlash", getHitFlashTemplate())
 	flash.Color = sparkColor
 	flash.Size = Vector3.new(0.8, 0.8, 0.8)
-	flash.Shape = Enum.PartType.Ball
 	flash.CFrame = CFrame.new(hitPosition)
 	flash.Transparency = 0.4
-	flash.Parent = folder
+	flash.Parent = workspace
 
-	local flashTween = TweenService:Create(flash, TweenInfo.new(0.08, Enum.EasingStyle.Quad), {
+	VFXSystem:Add(flash, 0.08, {
 		Transparency = 1,
-		Size = Vector3.new(0.1, 0.1, 0.1),
+		Size = Vector3.new(0.1, 0.1, 0.1)
+	}, {
+		EasingStyle = Enum.EasingStyle.Quad,
+		PoolName = "HitFlash"
 	})
-	flashTween:Play()
-
-	Debris:AddItem(flash, 0.15)
 end
 
 --[[
     Full ranged attack VFX sequence
-    Spawns muzzle flash, tracer, and hit sparks
-    @param muzzlePos: Gun muzzle position
-    @param hitPos: Where the bullet hit
-    @param hitNormal: Surface normal (optional)
-    @param config: Attack config (from ClassConfig.RangedAttack)
 ]]
 function ProjectileEffects:PlayRangedHitEffects(muzzlePos: Vector3, hitPos: Vector3, hitNormal: Vector3?, config: any?)
 	local cfg = config or DEFAULT_CONFIG
+	if (hitPos - muzzlePos).Magnitude < 0.01 then return end
 
-	-- Calculate direction with safety check
-	local diff = hitPos - muzzlePos
-	if diff.Magnitude < 0.01 then
-		return
-	end
-	local direction = diff.Unit
-
-	-- Muzzle flash
-	self:SpawnMuzzleFlash(muzzlePos, direction, cfg)
-
-	-- Tracer
+	self:SpawnMuzzleFlash(muzzlePos, (hitPos - muzzlePos).Unit, cfg)
 	self:SpawnTracer(muzzlePos, hitPos, cfg)
-
-	-- Hit sparks
 	self:SpawnHitSparks(hitPos, hitNormal, cfg)
 end
 
 --[[
-    Play miss effects (no hit sparks)
-    @param muzzlePos: Gun muzzle position
-    @param endPos: Where the bullet ends (max range point)
-    @param config: Attack config
+    Play miss effects
 ]]
 function ProjectileEffects:PlayRangedMissEffects(muzzlePos: Vector3, endPos: Vector3, config: any?)
 	local cfg = config or DEFAULT_CONFIG
+	if (endPos - muzzlePos).Magnitude < 0.01 then return end
 
-	-- Calculate direction with safety check
-	local diff = endPos - muzzlePos
-	if diff.Magnitude < 0.01 then
-		return
-	end
-	local direction = diff.Unit
-
-	-- Muzzle flash
-	self:SpawnMuzzleFlash(muzzlePos, direction, cfg)
-
-	-- Tracer (fades before reaching max range for visual effect)
+	self:SpawnMuzzleFlash(muzzlePos, (endPos - muzzlePos).Unit, cfg)
 	self:SpawnTracer(muzzlePos, endPos, cfg)
 end
 
 --[[
-    Initialize the module
+    Lifecycle
 ]]
 function ProjectileEffects:Init()
 	print("[ProjectileEffects] Initialized")
 end
 
---[[
-    Start the module
-]]
 function ProjectileEffects:Start()
 	print("[ProjectileEffects] Started")
 end
