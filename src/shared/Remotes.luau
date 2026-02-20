@@ -65,25 +65,37 @@ local REMOTE_FUNCTIONS = {
     Initialize remotes (call from server)
 ]]
 function Remotes:InitServer()
-	-- Create Remotes folder
-	local folder = Instance.new("Folder")
-	folder.Name = "Remotes"
+	-- Check for existing Remotes folder
+	local folder = ReplicatedStorage:FindFirstChild("Remotes")
+	local isNew = false
+
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = "Remotes"
+		isNew = true
+	end
 
 	-- Create RemoteEvents
 	for _, name in REMOTE_EVENTS do
-		local remote = Instance.new("RemoteEvent")
-		remote.Name = name
-		remote.Parent = folder
+		if not folder:FindFirstChild(name) then
+			local remote = Instance.new("RemoteEvent")
+			remote.Name = name
+			remote.Parent = folder
+		end
 	end
 
 	-- Create RemoteFunctions
 	for _, name in REMOTE_FUNCTIONS do
-		local remote = Instance.new("RemoteFunction")
-		remote.Name = name
-		remote.Parent = folder
+		if not folder:FindFirstChild(name) then
+			local remote = Instance.new("RemoteFunction")
+			remote.Name = name
+			remote.Parent = folder
+		end
 	end
 
-	folder.Parent = ReplicatedStorage
+	if isNew then
+		folder.Parent = ReplicatedStorage
+	end
 
 	print("[Remotes] Server initialized")
 	return folder
