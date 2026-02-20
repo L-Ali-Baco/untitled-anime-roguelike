@@ -24,6 +24,9 @@ local pitch = 0 -- Vertical rotation (looking up/down)
 local yaw = 0 -- Horizontal rotation (looking left/right)
 local currentDistance = CameraConfig.Distance
 
+-- Bobbing state
+local bobTime = 0
+
 -- Smoothing state (for interpolation)
 local lastCharacterPosition: Vector3? = nil
 local smoothedPosition: Vector3? = nil
@@ -152,6 +155,40 @@ local function onRenderStepped(deltaTime: number)
 
 	-- Calculate target camera CFrame
 	local targetCF = calculateCameraCFrame(characterPos)
+
+	-- Apply procedural camera bobbing if moving
+	local isMoving = false
+	local rootPart = getCharacterRootPart()
+	if rootPart then
+		local velocity = rootPart.AssemblyLinearVelocity
+		local horizontalSpeed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+		isMoving = horizontalSpeed > 1
+
+		if isMoving then
+			-- Increase bob time based on speed (feels more authentic at different speeds)
+			-- Scrapper is very fast (1.5x) so this makes it match her footfalls
+			local speedScale = math.clamp(horizontalSpeed / 16, 0.5, 2.0)
+			bobTime = bobTime + (deltaTime * 12 * speedScale)
+		end
+	end
+
+	if isMoving then
+		-- Calculate bob offsets
+		-- Y bob: double frequency for walking steps (up and down twice per cycle)
+		local bobY = math.sin(bobTime) * 0.12
+		-- X bob: side to side sway
+		local bobX = math.cos(bobTime * 0.5) * 0.08
+		-- Pitch bob: slight camera tilt
+		local bobPitch = math.sin(bobTime) * 0.01
+
+		-- Apply bobbing relative to camera rotation
+		local bobOffset = targetCF.RightVector * bobX + targetCF.UpVector * bobY
+		targetCF = targetCF + bobOffset
+		targetCF = targetCF * CFrame.Angles(bobPitch, 0, 0)
+	else
+		-- Quickly return to neutral when stopped
+		bobTime = bobTime * (1 - deltaTime * 10)
+	end
 
 	-- Apply rotation smoothing (separate from position smoothing)
 	local rotationSmoothing = CameraConfig.RotationSmoothing
