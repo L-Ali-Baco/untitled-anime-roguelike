@@ -113,6 +113,8 @@ return {
 		ImpactRingEnabled = true, -- For finisher (3rd hit)
 		ImpactRingColor = Color3.fromRGB(255, 220, 150),
 		ImpactRingSize = 6,
+
+		ChainLightningColor = Color3.fromRGB(100, 200, 255), -- Bright blue/cyan
 	},
 
 	-- Damage Numbers (floating damage text)

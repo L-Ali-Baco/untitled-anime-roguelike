@@ -67,7 +67,15 @@ local function triggerChainLightning(
 		chainCount += 1
 
 		-- VFX
-		-- TODO: Fire remote for lightning bolt
+		local procRemote = Remotes:GetEvent("ProcTriggered")
+		if procRemote then
+			procRemote:FireAllClients({
+				Type = "ChainLightning",
+				Source = primaryTarget,
+				Target = enemy,
+			})
+		end
+
 		print("ZAP! " .. enemy.Name)
 	end
 end

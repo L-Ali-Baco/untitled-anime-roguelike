@@ -26,6 +26,7 @@ EnemyVFXController.Name = "EnemyVFXController"
 local DamageNumbers = nil
 local ScreenShakeController = nil
 local AttackVFXPlayer = nil
+local CombatEffects = nil
 
 -- Connections
 local connections: { RBXScriptConnection } = {}
@@ -261,6 +262,20 @@ local function onEnemySpawned(data)
 end
 
 --[[
+    Handle proc triggered event
+]]
+local function onProcTriggered(data)
+	-- data = { Type, Source, Target }
+	if data.Type == "ChainLightning" then
+		if CombatEffects and data.Source and data.Target then
+			local sourcePos = data.Source:GetPivot().Position
+			local targetPos = data.Target:GetPivot().Position
+			CombatEffects:SpawnLightningBolt(sourcePos, targetPos)
+		end
+	end
+end
+
+--[[
     Handle enemy state change event
 ]]
 local function onEnemyStateChanged(enemyModel: Model, newState: string)
@@ -420,6 +435,7 @@ function EnemyVFXController:Init()
 	DamageNumbers = tryRequire(script.Parent.Parent.VFX.DamageNumbers)
 	ScreenShakeController = tryRequire(script.Parent.Parent.VFX.ScreenShakeController)
 	AttackVFXPlayer = tryRequire(script.Parent.Parent.VFX.AttackVFXPlayer)
+	CombatEffects = tryRequire(script.Parent.Parent.VFX.CombatEffects)
 
 	-- Pass screen shake controller to the attack VFX player
 	if AttackVFXPlayer then
@@ -457,6 +473,11 @@ function EnemyVFXController:Start()
 	local stateRemote = Remotes:GetEvent("EnemyStateChanged")
 	if stateRemote then
 		table.insert(connections, stateRemote.OnClientEvent:Connect(onEnemyStateChanged))
+	end
+
+	local procRemote = Remotes:GetEvent("ProcTriggered")
+	if procRemote then
+		table.insert(connections, procRemote.OnClientEvent:Connect(onProcTriggered))
 	end
 
 	-- Listen for player health changes to show damage numbers on actual hits

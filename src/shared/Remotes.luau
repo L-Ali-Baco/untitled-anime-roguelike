@@ -51,6 +51,9 @@ local REMOTE_EVENTS = {
 	-- Debug
 	"DebugMessage", -- Server -> Client: Send debug message to display
 
+	-- Proc System
+	"ProcTriggered", -- Server -> Clients: Item proc triggered (for VFX)
+
 	-- Director System ("The Storm")
 	"DirectorDifficultyUpdate", -- Server -> Client: Difficulty sync
 	"DirectorEventTriggered", -- Server -> Client: Event notification

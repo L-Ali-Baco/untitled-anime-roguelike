@@ -387,6 +387,46 @@ end
 --[[
     Spawn knockback effect on enemy
 ]]
+--[[
+    Create a lightning bolt between two positions
+]]
+function CombatEffects:SpawnLightningBolt(startPos: Vector3, endPos: Vector3)
+	local distance = (endPos - startPos).Magnitude
+
+	local bolt = Instance.new("Part")
+	bolt.Name = "LightningBolt"
+	bolt.Anchored = true
+	bolt.CanCollide = false
+	bolt.CanQuery = false
+	bolt.CanTouch = false
+	bolt.CastShadow = false
+	bolt.Material = Enum.Material.Neon
+	bolt.Color = CombatConfig.Effects.ChainLightningColor
+	bolt.Size = Vector3.new(0.2, 0.2, distance)
+	bolt.CFrame = CFrame.lookAt(startPos, endPos) * CFrame.new(0, 0, -distance / 2)
+	bolt.Parent = workspace.Terrain
+
+	-- Quick flicker and fade
+	local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local fadeTween = TweenService:Create(bolt, tweenInfo, {
+		Size = Vector3.new(0, 0, distance),
+		Transparency = 1,
+	})
+
+	fadeTween:Play()
+	Debris:AddItem(bolt, 0.25)
+
+	-- Add some "jaggedness" with a few smaller branches (optional, but adds flavor)
+	task.spawn(function()
+		for i = 1, 3 do
+			task.wait(0.03)
+			if bolt and bolt.Parent then
+				bolt.Transparency = if bolt.Transparency == 0 then 0.5 else 0
+			end
+		end
+	end)
+end
+
 function CombatEffects:SpawnKnockbackTrail(character: Model, direction: Vector3)
 	local rootPart = character:FindFirstChild("HumanoidRootPart")
 	if not rootPart then
