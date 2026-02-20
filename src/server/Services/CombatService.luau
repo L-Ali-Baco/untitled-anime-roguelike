@@ -683,4 +683,7 @@ function CombatService:Start()
 	print("[CombatService] Started successfully")
 end
 
+-- Export private functions for testing
+CombatService._processDamage = processDamage
+
 return CombatService
