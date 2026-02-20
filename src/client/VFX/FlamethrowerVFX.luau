@@ -228,12 +228,25 @@ function FlamethrowerVFX:StopStream()
 	stream.light = nil
 end
 
-function FlamethrowerVFX:PlayHitEffect(position: Vector3)
-	local att = Instance.new("Attachment")
-	att.WorldPosition = position
-	att.Parent = workspace.Terrain
+-- OPTIMIZATION: Object Pooling for Hit Effects
+local hitEffectPool = {}
+
+local function getHitEffectFromPool()
+	local att = table.remove(hitEffectPool)
+	if att then
+		-- Reset state if needed
+		local light = att:FindFirstChildOfClass("PointLight")
+		if light then
+			light.Brightness = 3 -- Reset brightness
+		end
+		return att
+	end
+
+	-- Create new if pool empty
+	att = Instance.new("Attachment")
 
 	local burst = Instance.new("ParticleEmitter")
+	burst.Name = "Burst"
 	burst.Texture = TEX_FIRE_A
 	applyFlipbook(burst, Enum.ParticleFlipbookLayout.Grid4x4)
 	burst.Color = ColorSequence.new({
@@ -261,16 +274,41 @@ function FlamethrowerVFX:PlayHitEffect(position: Vector3)
 	burst.Rotation = NumberRange.new(0, 360)
 	burst.RotSpeed = NumberRange.new(-200, 200)
 	burst.Parent = att
-	burst:Emit(10)
 
 	local flash = Instance.new("PointLight")
 	flash.Color = Color3.fromRGB(255, 140, 35)
 	flash.Brightness = 3
 	flash.Range = 8
 	flash.Parent = att
-	TweenService:Create(flash, TweenInfo.new(0.12), { Brightness = 0 }):Play()
 
-	Debris:AddItem(att, 0.5)
+	return att
+end
+
+local function returnHitEffectToPool(att)
+	att.Parent = nil
+	table.insert(hitEffectPool, att)
+end
+
+function FlamethrowerVFX:PlayHitEffect(position: Vector3)
+	local att = getHitEffectFromPool()
+	att.WorldPosition = position
+	att.Parent = workspace.Terrain
+
+	local burst = att:FindFirstChild("Burst")
+	if burst then
+		burst:Emit(10)
+	end
+
+	local flash = att:FindFirstChildOfClass("PointLight")
+	if flash then
+		flash.Brightness = 3 -- Reset
+		TweenService:Create(flash, TweenInfo.new(0.12), { Brightness = 0 }):Play()
+	end
+
+	-- Return to pool after particles die
+	task.delay(0.5, function()
+		returnHitEffectToPool(att)
+	end)
 end
 
 function FlamethrowerVFX:PlayRangedHitEffects(_origin, hitPos, _normal, _data)
