@@ -101,6 +101,121 @@ CombatController.OnRangedFired = Signal.new() -- Fires (target, hitPosition, did
 -- Forward declaration (defined later in file)
 local handleAttackInput
 
+-- Object Pooling for Flamethrower
+local FlamePool = {
+	Available = {},
+	Active = {},
+	Template = nil,
+	Container = nil,
+}
+
+function FlamePool:Init()
+	if self.Template then
+		return
+	end
+
+	local part = Instance.new("Part")
+	part.Name = "AnimeFire"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false -- Optimization
+	part.Material = Enum.Material.Neon
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	self.Template = part
+
+	self.Container = Instance.new("Folder")
+	self.Container.Name = "FlameContainer"
+	self.Container.Parent = workspace.Terrain
+end
+
+function FlamePool:Get()
+	if not self.Template then
+		self:Init()
+	end
+
+	local part = table.remove(self.Available)
+	if not part then
+		part = self.Template:Clone()
+		part.Parent = self.Container
+	end
+	part.Transparency = 0
+	return part
+end
+
+function FlamePool:Return(part)
+	part.CFrame = CFrame.new(0, -1000, 0)
+	table.insert(self.Available, part)
+end
+
+function FlamePool:Update(dt)
+	for i = #self.Active, 1, -1 do
+		local data = self.Active[i]
+		data.Elapsed += dt
+
+		if data.Elapsed >= data.Lifetime then
+			self:Return(data.Part)
+			table.remove(self.Active, i)
+		else
+			local progress = data.Elapsed / data.Lifetime
+			local alpha = TweenService:GetValue(progress, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+			-- Position
+			local newPos = data.StartPos:Lerp(data.EndPos, alpha)
+
+			-- Rotation
+			local rotOffset = CFrame.Angles(
+				data.RotSpeed.X * data.Elapsed,
+				data.RotSpeed.Y * data.Elapsed,
+				data.RotSpeed.Z * data.Elapsed
+			)
+			local currentRot = data.StartRot * rotOffset
+			data.Part.CFrame = CFrame.new(newPos) * currentRot
+
+			-- Size
+			local size = data.StartSize + (data.EndSize - data.StartSize) * alpha
+			data.Part.Size = Vector3.new(size, size, size)
+
+			-- Color
+			local color
+			if progress < 0.1 then
+				local t = progress / 0.1
+				color = Color3.fromRGB(255, 255, 200):Lerp(Color3.fromRGB(255, 180, 50), t)
+			elseif progress < 0.3 then
+				local t = (progress - 0.1) / 0.2
+				color = Color3.fromRGB(255, 180, 50):Lerp(Color3.fromRGB(200, 60, 20), t)
+			elseif progress < 0.5 then
+				local t = (progress - 0.3) / 0.2
+				color = Color3.fromRGB(200, 60, 20):Lerp(Color3.fromRGB(60, 60, 60), t)
+			else
+				color = Color3.fromRGB(60, 60, 60)
+			end
+			data.Part.Color = color
+
+			-- Transparency (Fade out at end, original tweened to 1 over lifetime)
+			data.Part.Transparency = alpha -- Using alpha (QuadOut) for transparency match
+		end
+	end
+end
+
+function FlamePool:Clear()
+	for _, part in self.Available do
+		part:Destroy()
+	end
+	for _, data in self.Active do
+		data.Part:Destroy()
+	end
+	table.clear(self.Available)
+	table.clear(self.Active)
+	if self.Container then
+		self.Container:Destroy()
+		self.Container = nil
+	end
+	self.Template = nil
+end
+
 --[[
     Get character parts
 ]]
@@ -960,7 +1075,7 @@ local function handleFlamethrowerTick(dt)
 	local rightDir = originCFrame.RightVector
 	local upDir = originCFrame.UpVector
 
-	-- A) MAIN FLAME BLOCKS
+	-- A) MAIN FLAME BLOCKS (Using Object Pool)
 	if ftData.VoxelEnabled then
 		for _ = 1, (ftData.VoxelCountPerFrame or 6) do
 			-- Subtle Turbulence Path (reduced from 0.4 to 0.15)
@@ -977,85 +1092,67 @@ local function handleFlamethrowerTick(dt)
 			
 			local startSize = ftData.CubeStartSize or 1.0
 			local endSize = ftData.CubeEndSize or 5.0
-			
-			local cube = Instance.new("Part")
-			cube.Name = "AnimeFire"
-			cube.Anchored = true
-			cube.CanCollide = false
-			cube.CanQuery = false
-			cube.CanTouch = false
-			cube.Material = Enum.Material.Neon
+
+			local cube = FlamePool:Get()
 			cube.Size = Vector3.new(startSize, startSize, startSize)
-			
-			-- High Intensity Start Color (Bright Yellow-White)
 			cube.Color = Color3.fromRGB(255, 255, 200)
-			cube.Transparency = 0
 			
 			local rot = CFrame.Angles(math.random()*6, math.random()*6, math.random()*6)
 			cube.CFrame = originCFrame * rot
-			cube.Parent = workspace.Terrain
-			Debris:AddItem(cube, lifetime + 0.1)
-			
+
 			local travelDist = speed * lifetime
-			local endPos = originCFrame.Position + dir * travelDist + Vector3.new(0, 4, 0) -- Reduced rise
-			
-			-- Smoother Expansion (Quad instead of Back)
-			local tweenInfo = TweenInfo.new(lifetime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-			local targetRot = rot * CFrame.Angles(math.random()*3, math.random()*3, math.random()*3)
-			
-			local tween = TweenService:Create(cube, tweenInfo, {
-				CFrame = CFrame.new(endPos) * targetRot,
-				Size = Vector3.new(endSize, endSize, endSize),
-				Transparency = 1
+			local endPos = originCFrame.Position + dir * travelDist + Vector3.new(0, 4, 0)
+
+			table.insert(FlamePool.Active, {
+				Part = cube,
+				Lifetime = lifetime,
+				Elapsed = 0,
+				StartPos = originCFrame.Position,
+				EndPos = endPos,
+				StartSize = startSize,
+				EndSize = endSize,
+				StartRot = rot,
+				RotSpeed = Vector3.new(math.random()*3, math.random()*3, math.random()*3),
+				Direction = dir,
+				Speed = speed
 			})
-			tween:Play()
-			
-			-- Stylized Flame Palette (Yellow -> Vibrant Orange -> Warm Red -> Dark Smoke)
-			task.spawn(function()
-				task.wait(lifetime * 0.1)
-				if not cube.Parent then return end
-				TweenService:Create(cube, TweenInfo.new(lifetime * 0.2), {Color = Color3.fromRGB(255, 180, 50)}):Play() -- Warm Orange
-				task.wait(lifetime * 0.2)
-				if not cube.Parent then return end
-				TweenService:Create(cube, TweenInfo.new(lifetime * 0.3), {Color = Color3.fromRGB(200, 60, 20)}):Play() -- Burnt Red
-				task.wait(lifetime * 0.2)
-				if not cube.Parent then return end
-				TweenService:Create(cube, TweenInfo.new(lifetime * 0.2), {Color = Color3.fromRGB(60, 60, 60)}):Play() -- Smoke Grey
-			end)
 		end
 	end
 
-	-- B) SPARK SPRAY (Hyper-fast detached embers)
+	-- B) SPARK SPRAY (Using ParticleEmitter)
 	if ftData.StraysEnabled then
-		for _ = 1, (ftData.StrayCountPerFrame or 3) do
-			local spreadAmount = ftData.StraySpread or 1.0
-			local spreadX = (math.random() - 0.5) * spreadAmount
-			local spreadY = (math.random() - 0.5) * spreadAmount
-			
-			local dir = (forwardDir + rightDir * spreadX + upDir * spreadY).Unit
-			local speed = (ftData.StraySpeed or 110) * (0.7 + math.random() * 0.6)
-			local lifetime = (ftData.StrayLifetime or 0.35)
-			
-			local spark = Instance.new("Part")
-			spark.Name = "FireSpark"
-			spark.Anchored = true
-			spark.CanCollide = false
-			spark.CanQuery = false
-			spark.Material = Enum.Material.Neon
-			spark.Size = Vector3.new(0.2, 0.2, 0.2)
-			spark.Color = Color3.fromRGB(255, 255, 180)
-			spark.CFrame = originCFrame
-			spark.Parent = workspace.Terrain
-			Debris:AddItem(spark, lifetime + 0.1)
-			
-			local endPos = originCFrame.Position + dir * (speed * lifetime)
-			
-			TweenService:Create(spark, TweenInfo.new(lifetime, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {
-				Position = endPos,
-				Size = Vector3.new(0, 0, 0),
-				Transparency = 0.5
-			}):Play()
+		local att = rootPart:FindFirstChild("FlamethrowerEmitterAtt")
+		if not att then
+			att = Instance.new("Attachment")
+			att.Name = "FlamethrowerEmitterAtt"
+			att.CFrame = spawnOffset
+			att.Parent = rootPart
 		end
+
+		local em = att:FindFirstChild("FlamethrowerSparks")
+		if not em then
+			em = Instance.new("ParticleEmitter")
+			em.Name = "FlamethrowerSparks"
+			em.Texture = "rbxassetid://0" -- Dot/Square
+			em.Size = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.2),
+				NumberSequenceKeypoint.new(1, 0)
+			})
+			em.Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0),
+				NumberSequenceKeypoint.new(1, 0.5)
+			})
+			em.Color = ColorSequence.new(Color3.fromRGB(255, 255, 180))
+			em.Lifetime = NumberRange.new(ftData.StrayLifetime or 0.35)
+			local baseStraySpeed = ftData.StraySpeed or 110
+			em.Speed = NumberRange.new(baseStraySpeed * 0.7, baseStraySpeed * 1.3)
+			em.SpreadAngle = Vector2.new(15, 15)
+			em.Rate = 0
+			em.Enabled = false
+			em.Parent = att
+		end
+
+		em:Emit(ftData.StrayCountPerFrame or 3)
 	end
 
 	-- Light
@@ -1124,6 +1221,8 @@ end
     Heartbeat handler
 ]]
 local function onHeartbeat(dt)
+	FlamePool:Update(dt)
+
 	if isFlamethrowerActive then
 		handleFlamethrowerTick(dt)
 	end
@@ -1205,6 +1304,8 @@ function CombatController:Destroy()
 		hitboxConnection:Disconnect()
 		hitboxConnection = nil
 	end
+
+	FlamePool:Clear()
 end
 
 return CombatController
