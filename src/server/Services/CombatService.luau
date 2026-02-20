@@ -117,7 +117,7 @@ local function validateAttack(
 	-- Rate limiting (anti-cheat)
 	-- IMPORTANT: Skip rate limit if this is the same attack (AOE hitting multiple targets)
 	-- Multiple hits with the same attackId are allowed within the same swing
-	local now = tick()
+	local now = os.clock()
 	local lastAttack = playerLastAttack[player] or 0
 	local lastAttackId = playerLastAttackId[player]
 
@@ -433,7 +433,7 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 	-- Update last attack time and ID (Close the rate limit window)
 	local lastAttackId = playerLastAttackId[player]
 	if attackId ~= lastAttackId then
-		playerLastAttack[player] = tick()
+		playerLastAttack[player] = os.clock()
 		playerLastAttackId[player] = attackId
 
 		-- Update Combo State
@@ -441,12 +441,12 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 			playerComboState[player] = { CurrentIndex = 0, LastAttackTime = 0 }
 		end
 		playerComboState[player].CurrentIndex = attackIndex
-		playerComboState[player].LastAttackTime = tick()
+		playerComboState[player].LastAttackTime = os.clock()
 	end
 
 	-- Cleanup attack hit tracking after a short delay
 	-- OPTIMIZATION: Use centralized queue instead of task.delay to reduce scheduler overhead
-	table.insert(activeAttacks, { id = attackId, expiry = tick() + 1 })
+	table.insert(activeAttacks, { id = attackId, expiry = os.clock() + 1 })
 end
 
 -- ============================================================================
@@ -475,7 +475,7 @@ local function validateRangedAttack(player: Player, targetModel: Model?, hitPosi
 	end
 
 	-- Rate limiting (anti-cheat)
-	local now = tick()
+	local now = os.clock()
 	local lastRangedAttack = playerLastRangedAttack[player] or 0
 	local minInterval = (ClassConfig.Server.MinRangedInterval or 0.08) * 0.9 -- 10% grace period
 	if now - lastRangedAttack < minInterval then
@@ -567,7 +567,7 @@ local function onRequestRangedHit(player: Player, targetModel: Model?, hitPositi
 	end
 
 	-- Update last attack time
-	playerLastRangedAttack[player] = tick()
+	playerLastRangedAttack[player] = os.clock()
 
 	-- If no target, nothing more to do (miss)
 	if not targetModel then
@@ -613,7 +613,7 @@ local function onRequestRangedHit(player: Player, targetModel: Model?, hitPositi
 
 	-- Cleanup attack hit tracking after a short delay
 	-- OPTIMIZATION: Use centralized queue instead of task.delay to reduce scheduler overhead
-	table.insert(activeAttacks, { id = attackId, expiry = tick() + 0.5 })
+	table.insert(activeAttacks, { id = attackId, expiry = os.clock() + 0.5 })
 end
 
 --[[
@@ -635,7 +635,7 @@ function CombatService:Start()
 	-- Start cleanup loop
 	-- OPTIMIZATION: Batch cleanup operations to reduce scheduler overhead
 	RunService.Heartbeat:Connect(function()
-		local now = tick()
+		local now = os.clock()
 		-- Process queue from the start (oldest entries first)
 		while #activeAttacks > 0 do
 			local entry = activeAttacks[1]

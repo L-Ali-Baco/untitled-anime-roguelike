@@ -30,10 +30,10 @@ local function applyBurn(
 	local burnTag = "Burn_" .. player.UserId
 	if enemy:GetAttribute(burnTag) then
 		-- Refresh duration by resetting the attribute
-		enemy:SetAttribute(burnTag, tick())
+		enemy:SetAttribute(burnTag, os.clock())
 		return
 	end
-	enemy:SetAttribute(burnTag, tick())
+	enemy:SetAttribute(burnTag, os.clock())
 
 	task.spawn(function()
 		local ticks = math.floor(burnDuration / tickRate)
@@ -86,8 +86,8 @@ function BikerKingSkills.InfernoRamp(player: Player, skillData: any)
 
 	-- Immediately burn nearby enemies and keep pulsing burns for the duration
 	task.spawn(function()
-		local startTime = tick()
-		while tick() - startTime < duration do
+		local startTime = os.clock()
+		while os.clock() - startTime < duration do
 			if not character or not character.Parent then
 				break
 			end
