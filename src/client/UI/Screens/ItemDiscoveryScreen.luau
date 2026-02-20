@@ -202,9 +202,9 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 
 			-- Fade in state
 			task.spawn(function()
-				local start = tick()
-				while tick() - start < 0.5 do
-					transparency:set(1 - ((tick() - start) / 0.5))
+				local start = os.clock()
+				while os.clock() - start < 0.5 do
+					transparency:set(1 - ((os.clock() - start) / 0.5))
 					task.wait()
 				end
 				transparency:set(0)
@@ -215,9 +215,9 @@ function ItemDiscoveryScreen.new(): { show: (itemKey: string) -> (), destroy: ()
 
 			-- Wait then fade out
 			task.delay(2.5, function()
-				local start = tick()
-				while tick() - start < 0.5 do
-					transparency:set((tick() - start) / 0.5)
+				local start = os.clock()
+				while os.clock() - start < 0.5 do
+					transparency:set((os.clock() - start) / 0.5)
 					task.wait()
 				end
 				transparency:set(1)

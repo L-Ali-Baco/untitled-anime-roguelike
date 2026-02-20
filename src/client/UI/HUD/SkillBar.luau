@@ -110,7 +110,7 @@ local function SkillSlot(scope, props)
 
 	-- State
 	local cooldownEnd = scope:Value(0)
-	local now = scope:Value(tick())
+	local now = scope:Value(os.clock())
 	local isHovered = scope:Value(false)
 
 	-- Listen for skill usage
@@ -122,7 +122,7 @@ local function SkillSlot(scope, props)
 
 			if data.Name == currentName then
 				print("[SkillBar] Starting Cooldown for:", currentName, currentDuration)
-				cooldownEnd:set(tick() + currentDuration)
+				cooldownEnd:set(os.clock() + currentDuration)
 			end
 		end
 	end)
@@ -131,14 +131,14 @@ local function SkillSlot(scope, props)
 	-- Cooldown Sync
 	local conn2 = Remotes:GetEvent("SkillCooldown").OnClientEvent:Connect(function(slot, remaining)
 		if props.Slot == slot then
-			cooldownEnd:set(tick() + remaining)
+			cooldownEnd:set(os.clock() + remaining)
 		end
 	end)
 	table.insert(scope, conn2)
 
 	-- Update timer
 	local hb = RunService.Heartbeat:Connect(function()
-		now:set(tick())
+		now:set(os.clock())
 	end)
 	table.insert(scope, hb)
 

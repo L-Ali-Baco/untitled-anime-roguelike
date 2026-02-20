@@ -71,7 +71,7 @@ local function tryUseSkill(slot: string)
 	end
 
 	-- Check local cooldown
-	local now = tick()
+	local now = os.clock()
 	local cdEnd = localCooldowns[slot] or 0
 	if now < cdEnd then
 		return
@@ -93,7 +93,7 @@ end
 local function onSkillUsed(player, slot, skillData)
 	if player == Players.LocalPlayer then
 		-- Ensure local cooldown is synced
-		localCooldowns[slot] = tick() + skillData.Cooldown
+		localCooldowns[slot] = os.clock() + skillData.Cooldown
 
 		-- VFX already played via prediction, or played by SkillVFX listening to remote
 		-- We don't need to do anything else here for local player
@@ -107,7 +107,7 @@ end
     Handle cooldown sync (server rejected request)
 ]]
 local function onSkillCooldown(slot, remaining)
-	localCooldowns[slot] = tick() + remaining
+	localCooldowns[slot] = os.clock() + remaining
 end
 
 function SkillController:Init()

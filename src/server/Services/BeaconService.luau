@@ -133,7 +133,7 @@ local function onHeartbeat(dt: number)
 			data.Progress = math.min(100, data.Progress + chargeDelta)
 
 			-- Handle Spawning
-			local now = tick()
+			local now = os.clock()
 			if now - data.LastSpawn >= config.SpawnIntervalDuringCharge then
 				data.LastSpawn = now
 				if EnemyService then
@@ -163,7 +163,7 @@ local function onHeartbeat(dt: number)
 		end
 
 		-- Update Progress Remote (Throttled to ~10Hz or on significant change)
-		local now = tick()
+		local now = os.clock()
 		if now - data.LastProgressUpdate >= 0.1 then
 			data.LastProgressUpdate = now
 			local progressRemote = Remotes:GetEvent("BeaconProgressUpdated")

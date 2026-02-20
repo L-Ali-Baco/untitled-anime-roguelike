@@ -91,7 +91,7 @@ end
 ]]
 local function attemptSpawn(point: Instance)
 	local data = spawnPoints[point]
-	local now = tick()
+	local now = os.clock()
 
 	-- Check cooldown
 	if now - data.LastSpawnTime < EnemyConfig.Spawn.RespawnDelay then

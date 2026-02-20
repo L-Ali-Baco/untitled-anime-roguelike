@@ -41,7 +41,7 @@ end
 
 function TrainingDummy:OnHealthChanged(newHealth)
 	if newHealth < self.Humanoid.MaxHealth and newHealth > 0 then
-		local lastDamageTime = tick()
+		local lastDamageTime = os.clock()
 		self.LastDamageTime = lastDamageTime
 
 		-- Reset health after 2 seconds of no damage

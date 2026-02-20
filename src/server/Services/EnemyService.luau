@@ -44,7 +44,7 @@ local AIState = {
 local activeEnemies: { [Model]: EnemyData } = {}
 
 -- Track player I-frame states (for dodge damage immunity)
--- Stores expiry timestamp (tick()) to prevent client-authoritative indefinite invincibility
+-- Stores expiry timestamp (os.clock()) to prevent client-authoritative indefinite invincibility
 local playerIFrames: { [Player]: number } = {}
 -- Track last dash time for server-side cooldown enforcement
 local playerLastDash: { [Player]: number } = {}
@@ -177,7 +177,7 @@ local function updatePath(enemyData: EnemyData)
 		return
 	end
 
-	local now = tick()
+	local now = os.clock()
 
 	-- Only recalculate path periodically
 	if now - enemyData.LastPathUpdate < EnemyConfig.AI.PathRecalculateInterval then
@@ -279,8 +279,8 @@ local function moveTowardTarget(enemyData: EnemyData)
 	if enemyData.IsMoving then
 		if not enemyData.LastPos then
 			enemyData.LastPos = currentPos
-			enemyData.LastPosTime = tick()
-		elseif tick() - enemyData.LastPosTime > 1.0 then
+			enemyData.LastPosTime = os.clock()
+		elseif os.clock() - enemyData.LastPosTime > 1.0 then
 			local distMoved = (currentPos - enemyData.LastPos).Magnitude
 			if distMoved < 1.0 then
 				-- We are stuck! Apply upward impulse instead of Humanoid.Jump
@@ -288,7 +288,7 @@ local function moveTowardTarget(enemyData: EnemyData)
 				needsNewMove = true
 			end
 			enemyData.LastPos = currentPos
-			enemyData.LastPosTime = tick()
+			enemyData.LastPosTime = os.clock()
 		end
 	end
 
@@ -393,9 +393,9 @@ end
 ]]
 local function applySpeedCurve(track: AnimationTrack, duration: number, curve: { { number } })
 	task.spawn(function()
-		local startTime = tick()
-		while tick() - startTime < duration do
-			local elapsed = tick() - startTime
+		local startTime = os.clock()
+		while os.clock() - startTime < duration do
+			local elapsed = os.clock() - startTime
 			local t = math.clamp(elapsed / duration, 0, 1)
 
 			-- Find surrounding keypoints and lerp
@@ -523,9 +523,9 @@ local function performLeapAttack(enemyData: EnemyData)
 	end
 
 	-- Rise straight up
-	local launchStart = tick()
+	local launchStart = os.clock()
 	while true do
-		local elapsed = tick() - launchStart
+		local elapsed = os.clock() - launchStart
 		local t = math.clamp(elapsed / launchDuration, 0, 1)
 		if t >= 1 then break end
 
@@ -571,9 +571,9 @@ local function performLeapAttack(enemyData: EnemyData)
 	local flightStartPos = rootPart.Position -- At peak height
 	local landingPos = targetPos -- Target's ground position
 	-- Fly from peak height down toward landing position
-	local flightStart = tick()
+	local flightStart = os.clock()
 	while true do
-		local elapsed = tick() - flightStart
+		local elapsed = os.clock() - flightStart
 		local t = math.clamp(elapsed / flightDuration, 0, 1)
 		if t >= 1 then
 			break
@@ -670,7 +670,7 @@ local function performLeapAttack(enemyData: EnemyData)
 
 		-- Check I-frames
 		local iframeExpiry = playerIFrames[player]
-		if iframeExpiry and tick() < iframeExpiry then
+		if iframeExpiry and os.clock() < iframeExpiry then
 			local damageBlockedRemote = Remotes:GetEvent("DamageBlocked")
 			if damageBlockedRemote then
 				damageBlockedRemote:FireClient(player, {
@@ -805,7 +805,7 @@ local function performAttack(enemyData: EnemyData)
 
 		-- Check I-frames
 		local iframeExpiry = playerIFrames[target]
-		if iframeExpiry and tick() < iframeExpiry then
+		if iframeExpiry and os.clock() < iframeExpiry then
 			-- Dodged
 			local damageBlockedRemote = Remotes:GetEvent("DamageBlocked")
 			if damageBlockedRemote then
@@ -855,7 +855,7 @@ end
 ]]
 local function updateEnemyAI(enemyData: EnemyData, deltaTime: number)
 	local config = enemyData.Config
-	local now = tick()
+	local now = os.clock()
 	local oldState = enemyData.State
 
 	-- Skip if dead
@@ -1085,7 +1085,7 @@ function EnemyService:ApplyHitstun(enemyModel: Model, duration: number?)
 	if hitstunDuration > 0 then
 		local oldState = enemyData.State
 		enemyData.State = AIState.Hitstun
-		enemyData.HitstunEndTime = tick() + hitstunDuration
+		enemyData.HitstunEndTime = os.clock() + hitstunDuration
 
 		-- Reset movement state (stops LinearVelocity from being set)
 		enemyData.IsMoving = false
@@ -1553,7 +1553,7 @@ function EnemyService:Start()
 	if iframeRemote then
 		iframeRemote.OnServerEvent:Connect(function(player: Player, isInvincible: boolean)
 			if isInvincible then
-				local now = tick()
+				local now = os.clock()
 				local lastDash = playerLastDash[player] or 0
 				local dashConfig = MovementConfig.Dash
 				local minInterval = (dashConfig.Duration + dashConfig.Cooldown) * 0.9 -- 10% grace period
