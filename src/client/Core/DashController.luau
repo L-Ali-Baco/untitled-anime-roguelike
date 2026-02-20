@@ -193,7 +193,7 @@ local function performDash()
 
 	-- Check stamina
 	if not StaminaController:HasStamina(DashConfig.StaminaCost) then
-		-- TODO: Play "no stamina" feedback sound/effect
+		StaminaController:TriggerActionFailed("Dash")
 		return
 	end
 
