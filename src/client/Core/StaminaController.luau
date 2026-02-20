@@ -24,6 +24,7 @@ StaminaController.OnStaminaChanged = Signal.new() -- Fires (current, max, percen
 StaminaController.OnStaminaDepleted = Signal.new() -- Fires when stamina hits 0
 StaminaController.OnStaminaUsed = Signal.new() -- Fires (amount, remaining)
 StaminaController.OnStaminaActionFailed = Signal.new() -- Fires (actionName)
+StaminaController.OnStaminaFailure = Signal.new() -- Fires when stamina check fails
 
 -- Connections
 local connections: { RBXScriptConnection } = {}
@@ -185,6 +186,13 @@ end
 ]]
 function StaminaController:IsExhausted(): boolean
 	return currentStamina <= StaminaConfig.ExhaustedThreshold
+end
+
+--[[
+    Trigger stamina failure feedback
+]]
+function StaminaController:TriggerStaminaFailure()
+	StaminaController.OnStaminaFailure:Fire()
 end
 
 --[[

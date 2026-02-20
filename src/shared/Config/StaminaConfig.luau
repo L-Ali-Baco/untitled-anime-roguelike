@@ -21,4 +21,11 @@ return {
 	-- UI thresholds
 	LowStaminaThreshold = 0.25, -- show warning when below 25%
 	ExhaustedThreshold = 0, -- can't perform actions when at 0
+
+	-- Feedback
+	Feedback = {
+		NoStaminaSoundId = "rbxassetid://4676738150", -- Generic error beep
+		FailureFlashColor = Color3.fromRGB(255, 50, 50), -- Red flash on failure
+		FlashDuration = 0.2,
+	},
 }
