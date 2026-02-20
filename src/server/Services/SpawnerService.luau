@@ -22,9 +22,9 @@ local SpawnerService = {
 	Name = "SpawnerService",
 }
 
--- References to other services (set in Start)
-local EnemyService = nil
-local MapService = nil
+-- References to other services
+local EnemyService = require(script.Parent.EnemyService)
+local MapService = require(script.Parent.MapService)
 
 -- State
 local spawnPoints = {} -- { [Instance]: { LastSpawnTime: number } }
@@ -165,10 +165,6 @@ end
     Start the service
 ]]
 function SpawnerService:Start()
-	-- Requirement: EnemyService and MapService must be started
-	EnemyService = _G.EnemyService or require(script.Parent.EnemyService)
-	MapService = require(script.Parent.MapService)
-
 	-- Initial setup
 	refreshSpawnPoints()
 	-- MapService handles map loading, we just read from it
