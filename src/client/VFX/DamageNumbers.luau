@@ -20,6 +20,69 @@ local Config = CombatConfig.DamageNumbers
 -- Default damage type if not specified
 local DEFAULT_TYPE = "Normal"
 
+-- OPTIMIZATION: Object Pooling
+local damageNumberPool = {}
+
+local function getFromPool()
+	local anchor = table.remove(damageNumberPool)
+	if anchor then
+		return anchor
+	end
+
+	-- Create new if pool empty
+	anchor = Instance.new("Part")
+	anchor.Name = "DamageNumberAnchor"
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.CastShadow = false
+	anchor.Transparency = 1
+	anchor.Size = Vector3.new(0.1, 0.1, 0.1)
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "DamageNumber"
+	billboard.AlwaysOnTop = true
+	billboard.LightInfluence = 0
+	billboard.Adornee = anchor
+	billboard.Parent = anchor
+
+	local textLabel = Instance.new("TextLabel")
+	textLabel.Name = "DamageText"
+	textLabel.Size = UDim2.fromScale(1, 1)
+	textLabel.Position = UDim2.fromScale(0, 0)
+	textLabel.BackgroundTransparency = 1
+	textLabel.TextScaled = true
+	textLabel.FontFace = Config.FontFace
+	textLabel.Parent = billboard
+
+	if Config.StrokeEnabled then
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Config.StrokeColor
+		stroke.Thickness = Config.StrokeThickness
+		stroke.Parent = textLabel
+	end
+
+	return anchor
+end
+
+local function returnToPool(anchor)
+	anchor.Parent = nil
+	-- Reset common properties
+	local billboard = anchor:FindFirstChild("DamageNumber")
+	if billboard then
+		local textLabel = billboard:FindFirstChild("DamageText")
+		if textLabel then
+			textLabel.TextTransparency = 0
+			local stroke = textLabel:FindFirstChildOfClass("UIStroke")
+			if stroke then
+				stroke.Transparency = 0
+			end
+		end
+	end
+	table.insert(damageNumberPool, anchor)
+end
+
 --[[
     Spawn a floating damage number at the given world position.
     @param position: World position to spawn at (typically enemy HumanoidRootPart position)
@@ -45,49 +108,24 @@ function DamageNumbers:Spawn(position: Vector3, damage: number, damageType: stri
 	local randomOffsetX = (math.random() - 0.5) * 2 * Config.RandomOffsetX
 	local spawnPosition = position + Vector3.new(randomOffsetX, 0, 0)
 
-	-- Create anchor part (invisible, just for BillboardGui attachment)
-	local anchor = Instance.new("Part")
-	anchor.Name = "DamageNumberAnchor"
-	anchor.Anchored = true
-	anchor.CanCollide = false
-	anchor.CanQuery = false
-	anchor.CanTouch = false
-	anchor.CastShadow = false
-	anchor.Transparency = 1
-	anchor.Size = Vector3.new(0.1, 0.1, 0.1)
+	-- Get from pool
+	local anchor = getFromPool()
 	anchor.Position = spawnPosition
 	anchor.Parent = workspace
 
-	-- Create BillboardGui
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "DamageNumber"
+	-- Update properties
+	local billboard = anchor.DamageNumber
 	billboard.Size = UDim2.fromScale(baseWidth, baseHeight)
-	billboard.StudsOffset = Vector3.new(0, 1, 0) -- Slightly above anchor
-	billboard.AlwaysOnTop = true
-	billboard.LightInfluence = 0
-	billboard.Adornee = anchor
-	billboard.Parent = anchor
+	billboard.StudsOffset = Vector3.new(0, 1, 0)
 
-	-- Create text label
-	local textLabel = Instance.new("TextLabel")
-	textLabel.Name = "DamageText"
-	textLabel.Size = UDim2.fromScale(1, 1)
-	textLabel.Position = UDim2.fromScale(0, 0)
-	textLabel.BackgroundTransparency = 1
+	local textLabel = billboard.DamageText
 	textLabel.Text = tostring(math.floor(damage))
 	textLabel.TextColor3 = color
-	textLabel.TextScaled = true
-	textLabel.FontFace = Config.FontFace
-	textLabel.TextTransparency = 0
-	textLabel.Parent = billboard
+	textLabel.TextTransparency = 0 -- Ensure visible
 
-	-- Add text stroke (outline) for readability
-	if Config.StrokeEnabled then
-		local stroke = Instance.new("UIStroke")
-		stroke.Color = Config.StrokeColor
-		stroke.Thickness = Config.StrokeThickness
+	local stroke = textLabel:FindFirstChildOfClass("UIStroke")
+	if stroke then
 		stroke.Transparency = 0
-		stroke.Parent = textLabel
 	end
 
 	-- Initial scale pop effect
@@ -116,7 +154,7 @@ function DamageNumbers:Spawn(position: Vector3, damage: number, damageType: stri
 	local fadeDuration = Config.Duration * 0.6
 
 	task.delay(fadeDelay, function()
-		if not textLabel or not textLabel.Parent then
+		if not textLabel or not textLabel.Parent or not anchor.Parent then
 			return
 		end
 
@@ -128,7 +166,6 @@ function DamageNumbers:Spawn(position: Vector3, damage: number, damageType: stri
 		fadeTween:Play()
 
 		-- Also fade stroke if present
-		local stroke = textLabel:FindFirstChildOfClass("UIStroke")
 		if stroke then
 			local strokeFade = TweenService:Create(
 				stroke,
@@ -140,7 +177,9 @@ function DamageNumbers:Spawn(position: Vector3, damage: number, damageType: stri
 	end)
 
 	-- Cleanup
-	Debris:AddItem(anchor, Config.Duration + 0.1)
+	task.delay(Config.Duration + 0.1, function()
+		returnToPool(anchor)
+	end)
 
 	return anchor
 end
@@ -215,49 +254,24 @@ function DamageNumbers:SpawnText(position: Vector3, text: string, damageType: st
 	local randomOffsetX = (math.random() - 0.5) * 2 * Config.RandomOffsetX
 	local spawnPosition = position + Vector3.new(randomOffsetX, 0, 0)
 
-	-- Create anchor part (invisible, just for BillboardGui attachment)
-	local anchor = Instance.new("Part")
-	anchor.Name = "DamageNumberAnchor"
-	anchor.Anchored = true
-	anchor.CanCollide = false
-	anchor.CanQuery = false
-	anchor.CanTouch = false
-	anchor.CastShadow = false
-	anchor.Transparency = 1
-	anchor.Size = Vector3.new(0.1, 0.1, 0.1)
+	-- Get from pool
+	local anchor = getFromPool()
 	anchor.Position = spawnPosition
 	anchor.Parent = workspace
 
-	-- Create BillboardGui
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "DamageNumber"
+	-- Update properties
+	local billboard = anchor.DamageNumber
 	billboard.Size = UDim2.fromScale(baseWidth, baseHeight)
-	billboard.StudsOffset = Vector3.new(0, 1, 0) -- Slightly above anchor
-	billboard.AlwaysOnTop = true
-	billboard.LightInfluence = 0
-	billboard.Adornee = anchor
-	billboard.Parent = anchor
+	billboard.StudsOffset = Vector3.new(0, 1, 0)
 
-	-- Create text label
-	local textLabel = Instance.new("TextLabel")
-	textLabel.Name = "DamageText"
-	textLabel.Size = UDim2.fromScale(1, 1)
-	textLabel.Position = UDim2.fromScale(0, 0)
-	textLabel.BackgroundTransparency = 1
+	local textLabel = billboard.DamageText
 	textLabel.Text = text -- Use provided text directly
 	textLabel.TextColor3 = color
-	textLabel.TextScaled = true
-	textLabel.FontFace = Config.FontFace
-	textLabel.TextTransparency = 0
-	textLabel.Parent = billboard
+	textLabel.TextTransparency = 0 -- Ensure visible
 
-	-- Add text stroke (outline) for readability
-	if Config.StrokeEnabled then
-		local stroke = Instance.new("UIStroke")
-		stroke.Color = Config.StrokeColor
-		stroke.Thickness = Config.StrokeThickness
+	local stroke = textLabel:FindFirstChildOfClass("UIStroke")
+	if stroke then
 		stroke.Transparency = 0
-		stroke.Parent = textLabel
 	end
 
 	-- Initial scale pop effect
@@ -286,7 +300,7 @@ function DamageNumbers:SpawnText(position: Vector3, text: string, damageType: st
 	local fadeDuration = Config.Duration * 0.6
 
 	task.delay(fadeDelay, function()
-		if not textLabel or not textLabel.Parent then
+		if not textLabel or not textLabel.Parent or not anchor.Parent then
 			return
 		end
 
@@ -298,7 +312,6 @@ function DamageNumbers:SpawnText(position: Vector3, text: string, damageType: st
 		fadeTween:Play()
 
 		-- Also fade stroke if present
-		local stroke = textLabel:FindFirstChildOfClass("UIStroke")
 		if stroke then
 			local strokeFade = TweenService:Create(
 				stroke,
@@ -310,7 +323,9 @@ function DamageNumbers:SpawnText(position: Vector3, text: string, damageType: st
 	end)
 
 	-- Cleanup
-	Debris:AddItem(anchor, Config.Duration + 0.1)
+	task.delay(Config.Duration + 0.1, function()
+		returnToPool(anchor)
+	end)
 
 	return anchor
 end

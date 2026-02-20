@@ -44,7 +44,10 @@ local playerLastAttackId: { [Player]: string } = {}
 -- Track hits per attack to prevent duplicate damage
 local attackHitTargets: { [string]: { [Model]: boolean } } = {}
 -- OPTIMIZATION: Centralized queue for attack cleanup to reduce scheduler overhead
+-- Uses a pointer-based queue to avoid O(N) table.remove operations
 local activeAttacks: { { id: string, expiry: number } } = {}
+local activeAttacksFirst = 1
+local activeAttacksLast = 0
 
 -- Track combo state per player to prevent sequence exploits (e.g. skipping to attack 3)
 local playerComboState: { [Player]: { CurrentIndex: number, LastAttackTime: number } } = {}
@@ -446,7 +449,8 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 
 	-- Cleanup attack hit tracking after a short delay
 	-- OPTIMIZATION: Use centralized queue instead of task.delay to reduce scheduler overhead
-	table.insert(activeAttacks, { id = attackId, expiry = tick() + 1 })
+	activeAttacksLast += 1
+	activeAttacks[activeAttacksLast] = { id = attackId, expiry = tick() + 1 }
 end
 
 -- ============================================================================
@@ -613,7 +617,8 @@ local function onRequestRangedHit(player: Player, targetModel: Model?, hitPositi
 
 	-- Cleanup attack hit tracking after a short delay
 	-- OPTIMIZATION: Use centralized queue instead of task.delay to reduce scheduler overhead
-	table.insert(activeAttacks, { id = attackId, expiry = tick() + 0.5 })
+	activeAttacksLast += 1
+	activeAttacks[activeAttacksLast] = { id = attackId, expiry = tick() + 0.5 }
 end
 
 --[[
@@ -637,17 +642,26 @@ function CombatService:Start()
 	RunService.Heartbeat:Connect(function()
 		local now = tick()
 		-- Process queue from the start (oldest entries first)
-		while #activeAttacks > 0 do
-			local entry = activeAttacks[1]
+		-- Using pointer index to avoid O(N) shifts
+		while activeAttacksFirst <= activeAttacksLast do
+			local entry = activeAttacks[activeAttacksFirst]
 			if now >= entry.expiry then
 				-- Remove the attack hit tracking data
 				attackHitTargets[entry.id] = nil
-				-- Remove from queue
-				table.remove(activeAttacks, 1)
+				-- Clear memory
+				activeAttacks[activeAttacksFirst] = nil
+				-- Advance pointer
+				activeAttacksFirst += 1
 			else
 				-- If oldest entry hasn't expired, newer ones won't either
 				break
 			end
+		end
+
+		-- Reset buffer indices if empty
+		if activeAttacksFirst > activeAttacksLast then
+			activeAttacksFirst = 1
+			activeAttacksLast = 0
 		end
 	end)
 

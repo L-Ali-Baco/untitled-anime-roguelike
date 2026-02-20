@@ -42,6 +42,9 @@ local AIState = {
 -- Track all active enemies
 -- Key: enemy Model, Value: enemy data table
 local activeEnemies: { [Model]: EnemyData } = {}
+-- Parallel array for efficient time-sliced iteration
+local activeEnemyList: { EnemyData } = {}
+local enemyUpdateIndex = 1
 
 -- Track player I-frame states (for dodge damage immunity)
 -- Stores expiry timestamp (tick()) to prevent client-authoritative indefinite invincibility
@@ -74,6 +77,8 @@ type EnemyData = {
 	LastPosTime: number?, -- For unstuck detection
 	AttackTriggered: boolean, -- Whether attack was triggered this attack state
 	CurrentAttack: any?, -- Selected attack data from config.Attacks (if multi-attack)
+	CachedTarget: Model?, -- Optimization: Cached character model
+	LastTargetUpdate: number?, -- Optimization: Timestamp of last scan
 }
 
 -- AI update accumulator
@@ -81,12 +86,34 @@ local aiUpdateAccumulator = 0
 
 --[[
     Get the nearest player to an enemy within aggro range
+    OPTIMIZATION: Implements target caching to avoid O(N*M) checks every frame
 ]]
-local function getNearestPlayer(enemyPosition: Vector3, aggroRange: number): Player?
+local function getNearestPlayer(enemyData: EnemyData, enemyPosition: Vector3, aggroRange: number): Player?
+	local now = tick()
+
+	-- Check cache first
+	if enemyData.CachedTarget and enemyData.LastTargetUpdate and (now - enemyData.LastTargetUpdate < 0.5) then
+		-- Verify cached target is still valid
+		local cached = enemyData.CachedTarget
+		if cached.Parent and cached:FindFirstChild("HumanoidRootPart") then
+			local humanoid = cached:FindFirstChildOfClass("Humanoid")
+			if humanoid and humanoid.Health > 0 then
+				local dist = (cached.HumanoidRootPart.Position - enemyPosition).Magnitude
+				if dist <= aggroRange * 1.2 then -- Slight hysteresis to stick to target
+					return Players:GetPlayerFromCharacter(cached)
+				end
+			end
+		end
+	end
+
+	-- Run full scan
 	local nearestPlayer: Player? = nil
 	local nearestDistance = aggroRange
 
-	for _, player in Players:GetPlayers() do
+	-- Optimization: Use GetPlayers once
+	local players = Players:GetPlayers()
+
+	for _, player in players do
 		local character = player.Character
 		if not character then
 			continue
@@ -107,6 +134,15 @@ local function getNearestPlayer(enemyPosition: Vector3, aggroRange: number): Pla
 			nearestDistance = distance
 			nearestPlayer = player
 		end
+	end
+
+	-- Update cache
+	if nearestPlayer and nearestPlayer.Character then
+		enemyData.CachedTarget = nearestPlayer.Character
+		enemyData.LastTargetUpdate = now
+	else
+		enemyData.CachedTarget = nil
+		enemyData.LastTargetUpdate = now
 	end
 
 	return nearestPlayer
@@ -882,8 +918,11 @@ local function updateEnemyAI(enemyData: EnemyData, deltaTime: number)
 	-- State machine
 	if enemyData.State == AIState.Idle then
 		-- Look for players
-		local nearestPlayer =
-			getNearestPlayer(enemyData.RootPart.Position, config.AggroRange or EnemyConfig.Aggro.DetectionRange)
+		local nearestPlayer = getNearestPlayer(
+			enemyData,
+			enemyData.RootPart.Position,
+			config.AggroRange or EnemyConfig.Aggro.DetectionRange
+		)
 
 		if nearestPlayer then
 			enemyData.Target = nearestPlayer
@@ -1331,6 +1370,7 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 	}
 
 	activeEnemies[enemyModel] = enemyData
+	table.insert(activeEnemyList, enemyData)
 
 	-- Handle death via IsDead attribute (replaces Humanoid.Died)
 	enemyModel:GetAttributeChangedSignal("IsDead"):Connect(function()
@@ -1370,6 +1410,11 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 		-- Cleanup after death animation
 		task.delay(EnemyConfig.Death.RagdollDuration, function()
 			activeEnemies[enemyModel] = nil
+			-- Remove from list (O(N) but rare event)
+			local idx = table.find(activeEnemyList, enemyData)
+			if idx then
+				table.remove(activeEnemyList, idx)
+			end
 
 			for _, part in enemyModel:GetDescendants() do
 				if part:IsA("BasePart") then
@@ -1577,25 +1622,38 @@ function EnemyService:Start()
 	end)
 
 	-- AI update loop
+	-- OPTIMIZATION: Time-sliced updates to prevent CPU spikes
 	RunService.Heartbeat:Connect(function(deltaTime)
-		aiUpdateAccumulator += deltaTime
+		local totalEnemies = #activeEnemyList
+		if totalEnemies == 0 then
+			return
+		end
 
-		-- Update at configured rate
-		if aiUpdateAccumulator >= EnemyConfig.AI.UpdateRate then
-			local updateDelta = aiUpdateAccumulator
-			aiUpdateAccumulator = 0
+		-- Calculate batch size to target ~20-30 updates per second for each enemy
+		-- If 60 FPS, update 1/2 or 1/3 of enemies per frame
+		local targetFps = 30 -- Update each enemy 30 times a second
+		local frameRate = 60 -- Assumed server FPS
+		local batchSize = math.ceil(totalEnemies * (targetFps / frameRate))
+		batchSize = math.max(batchSize, 1) -- At least 1 per frame
 
-			-- Update all enemies
-			for enemyModel, enemyData in activeEnemies do
-				if enemyModel and enemyModel.Parent and enemyData.State ~= AIState.Dead then
-					local success, err = pcall(function()
-						updateEnemyAI(enemyData, updateDelta)
-					end)
-					if not success then
-						warn("[EnemyService] AI update error for", enemyModel.Name, ":", err)
-					end
+		-- Process batch
+		for _ = 1, batchSize do
+			-- Wrap index
+			if enemyUpdateIndex > totalEnemies then
+				enemyUpdateIndex = 1
+			end
+
+			local enemyData = activeEnemyList[enemyUpdateIndex]
+			if enemyData and enemyData.Model and enemyData.Model.Parent and enemyData.State ~= AIState.Dead then
+				local success, err = pcall(function()
+					updateEnemyAI(enemyData, deltaTime)
+				end)
+				if not success then
+					warn("[EnemyService] AI update error for", enemyData.Model.Name, ":", err)
 				end
 			end
+
+			enemyUpdateIndex += 1
 		end
 	end)
 
