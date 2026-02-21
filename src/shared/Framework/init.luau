@@ -13,6 +13,7 @@ local Networking = require(script.Networking)
 
 local Framework = {}
 
+Framework.RemoteSignal = require(script.RemoteSignal)
 Framework.Services = {}
 Framework.Controllers = {}
 Framework.IsServer = RunService:IsServer()
