@@ -37,8 +37,6 @@ local function getCooldownRemaining(player: Player, slot: string): number
 	-- Map legacy names to config keys
 	if className == "Warrior" then
 		className = "Vanguard"
-	elseif className == "Gunner" then
-		className = "Gunslinger"
 	end
 
 	local classSkills = SkillConfig[className]
@@ -89,10 +87,8 @@ local function onRequestSkill(player: Player, slot: string, target: Model?, aimP
 	local className = ClassService:GetPlayerClass(player) or "Warrior"
 	-- Map names to config
 	local configName = className
-	if className == "Warrior" then
+	if configName == "Warrior" then
 		configName = "Vanguard"
-	elseif className == "Gunner" then
-		configName = "Gunslinger"
 	end
 
 	print("[SkillService] Class:", className, "Mapped:", configName)
@@ -107,13 +103,24 @@ local function onRequestSkill(player: Player, slot: string, target: Model?, aimP
 
 	-- Validate Cooldown
 	local remaining = getCooldownRemaining(player, slot)
+
 	if remaining > 0 then
-		-- Tell client to sync cooldown
-		local cdRemote = Remotes:GetEvent("SkillCooldown")
-		if cdRemote then
-			cdRemote:FireClient(player, slot, remaining)
+		local bypassCooldown = false
+		if configName == "Scrapper" and slot == "Skill1" then
+			local ScrapperSkills = require(script.Parent.Parent.Skills.ScrapperSkills)
+			if ScrapperSkills.IsSpooling and ScrapperSkills.IsSpooling(player) then
+				bypassCooldown = true
+			end
 		end
-		return
+
+		if not bypassCooldown then
+			-- Tell client to sync cooldown
+			local cdRemote = Remotes:GetEvent("SkillCooldown")
+			if cdRemote then
+				cdRemote:FireClient(player, slot, remaining)
+			end
+			return
+		end
 	end
 
 	-- Use Skill

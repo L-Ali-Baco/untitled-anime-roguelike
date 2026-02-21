@@ -99,8 +99,9 @@ local function validateAttack(
 
 	-- Determine rate limit based on class
 	local minInterval = CombatConfig.Server.MinAttackInterval
-	if className == "Gunner" then
-		minInterval = classData.RangedAttack.FireRate
+	if className == "Scrapper" then
+		-- Use configured ranged attack speed but allow a small latency bufferrior" then
+		minInterval = CombatConfig.Combo.AutoAttackInterval
 	elseif className == "Warrior" then
 		minInterval = CombatConfig.Combo.AutoAttackInterval
 	end
@@ -209,7 +210,7 @@ end
     2. During hitstun, MoveTo is paused, so velocity changes work smoothly
     3. Direct velocity is more predictable and easier to tune
 ]]
-local function applyKnockback(attacker: Model, target: Model, knockbackForce: number)
+local function applyKnockback(attacker: Model, target: Model, knockbackForce: number, customDirection: Vector3?)
 	local attackerRoot = attacker:FindFirstChild("HumanoidRootPart")
 	local targetRoot = getTargetRoot(target)
 
@@ -217,8 +218,13 @@ local function applyKnockback(attacker: Model, target: Model, knockbackForce: nu
 		return
 	end
 
-	-- Calculate knockback direction (from attacker to target, horizontal only)
-	local direction = (targetRoot.Position - attackerRoot.Position)
+	-- Calculate knockback direction
+	local direction
+	if customDirection and customDirection.Magnitude > 0.01 then
+		direction = customDirection
+	else
+		direction = (targetRoot.Position - attackerRoot.Position)
+	end
 	direction = Vector3.new(direction.X, 0, direction.Z)
 
 	if direction.Magnitude < 0.1 then
@@ -243,13 +249,14 @@ end
 	Internal helper to unify damage application logic
 	Returns: didDamage, targetDied
 ]]
-local function _applyDamage(
+function CombatService.ApplyDamage(
 	attacker: Player,
 	target: Model,
 	attackId: string,
 	baseDamage: number,
 	knockbackForce: number?,
-	isRanged: boolean
+	isRanged: boolean,
+	customKnockbackDir: Vector3?
 ): (boolean, boolean)
 	-- Check if we already hit this target with this attack ID
 	if attackHitTargets[attackId] and attackHitTargets[attackId][target] then
@@ -313,7 +320,7 @@ local function _applyDamage(
 	-- Apply knockback
 	local attackerCharacter = attacker.Character
 	if attackerCharacter and knockbackForce then
-		applyKnockback(attackerCharacter, target, knockbackForce)
+		applyKnockback(attackerCharacter, target, knockbackForce, customKnockbackDir)
 	end
 
 	-- Process On-Hit Effects
@@ -356,7 +363,7 @@ local function processDamage(attacker: Player, target: Model, attackIndex: numbe
 		return false, false
 	end
 
-	return _applyDamage(attacker, target, attackId, attackData.Damage, attackData.Knockback, false)
+	return CombatService.ApplyDamage(attacker, target, attackId, attackData.Damage, attackData.Knockback, false)
 end
 
 --[[
@@ -537,18 +544,21 @@ local function processRangedDamage(
 	attackId: string
 ): (boolean, boolean)
 	-- Get ranged attack data from config
-	local rangedData = ClassConfig.Gunner.RangedAttack
+	local rangedData = ClassConfig.Scrapper.RangedAttack
 	if not rangedData then
 		return false, false
 	end
 
-	return _applyDamage(attacker, target, attackId, rangedData.Damage, rangedData.Knockback, true)
+	return CombatService.ApplyDamage(attacker, target, attackId, rangedData.Damage, rangedData.Knockback, true)
 end
 
---[[
-    Handle ranged attack request from client
-]]
-local function onRequestRangedHit(player: Player, targetModel: Model?, hitPosition: Vector3, attackId: string)
+local function onRequestRangedHit(
+	player: Player,
+	targetModel: Model?,
+	hitPosition: Vector3,
+	attackId: string,
+	isShredShot: boolean?
+)
 	-- Type validation
 	if targetModel ~= nil and typeof(targetModel) ~= "Instance" then
 		return
@@ -581,8 +591,48 @@ local function onRequestRangedHit(player: Player, targetModel: Model?, hitPositi
 		return
 	end
 
+	-- Armor Shred Logic
+	if isShredShot and ClassConfig.Scrapper.Skills.KineticScrubber then
+		local config = ClassConfig.Scrapper.Skills.KineticScrubber
+		local hitRadius = config.Radius
+		local shredAmount = config.ShredAmount
+
+		local blastParams = OverlapParams.new()
+		local ignoreList = {}
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p.Character then
+				table.insert(ignoreList, p.Character)
+			end
+		end
+		blastParams.FilterDescendantsInstances = ignoreList
+
+		local blastParts = workspace:GetPartBoundsInRadius(hitPosition, hitRadius, blastParams)
+		local hitEnemies = {}
+
+		for _, bPart in ipairs(blastParts) do
+			local bModel = bPart:FindFirstAncestorOfClass("Model")
+			if bModel and EnemyLib:IsAlive(bModel) and not hitEnemies[bModel] then
+				hitEnemies[bModel] = true
+
+				-- Apply Shred attribute
+				local currentRes = bModel:GetAttribute("DamageResistance") or 0
+				bModel:SetAttribute("DamageResistance", currentRes - shredAmount)
+
+				-- Remove shred after duration
+				task.delay(config.ShredDuration, function()
+					if bModel and EnemyLib:IsAlive(bModel) then
+						local newRes = bModel:GetAttribute("DamageResistance") or 0
+						bModel:SetAttribute("DamageResistance", newRes + shredAmount)
+					end
+				end)
+			end
+		end
+
+		-- Could fire a custom Client VFX event here to show the explosion, for now rely on bullet VFX
+	end
+
 	-- Get ranged attack data for VFX info
-	local rangedData = ClassConfig.Gunner.RangedAttack
+	local rangedData = ClassConfig.Scrapper.RangedAttack
 
 	-- Send hit confirmation to ALL clients (for VFX)
 	local rangedHitConfirmedRemote = Remotes:GetEvent("RangedHitConfirmed")
@@ -614,6 +664,85 @@ local function onRequestRangedHit(player: Player, targetModel: Model?, hitPositi
 	-- Cleanup attack hit tracking after a short delay
 	-- OPTIMIZATION: Use centralized queue instead of task.delay to reduce scheduler overhead
 	table.insert(activeAttacks, { id = attackId, expiry = tick() + 0.5 })
+end
+
+--[[
+    Handle dash hit from Scrapper's Scavenger Slide
+]]
+local function onRequestDashHit(player: Player, targetModel: Model?)
+	if not targetModel then
+		return
+	end
+
+	local className = ClassService:GetPlayerClass(player)
+	if className ~= "Scrapper" then
+		return
+	end
+
+	local config = ClassConfig.Scrapper.Skills.ScavengersSlide
+	if not config then
+		return
+	end
+
+	-- Distance check
+	local playerChar = player.Character
+	local rootPart = playerChar and playerChar:FindFirstChild("HumanoidRootPart")
+	local targetRoot = getTargetRoot(targetModel)
+
+	if rootPart and targetRoot then
+		-- Distance tolerance for slide hits
+		if (rootPart.Position - targetRoot.Position).Magnitude <= 20 then
+			local blastParams = OverlapParams.new()
+			local ignoreList = {}
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p.Character then
+					table.insert(ignoreList, p.Character)
+				end
+			end
+			blastParams.FilterDescendantsInstances = ignoreList
+
+			local blastParts = workspace:GetPartBoundsInRadius(targetRoot.Position, config.AOERadius, blastParams)
+			local hitEnemies = {}
+			local enemiesStruck = 0
+
+			for _, bPart in ipairs(blastParts) do
+				local bModel = bPart:FindFirstAncestorOfClass("Model")
+				if bModel and EnemyLib:IsAlive(bModel) and not hitEnemies[bModel] then
+					hitEnemies[bModel] = true
+					enemiesStruck += 1
+
+					local bRoot = getTargetRoot(bModel)
+					local pushDir = nil
+					if bRoot then
+						-- Push radially outward from the primary hit target
+						pushDir = bRoot.Position - targetRoot.Position
+						if pushDir.Magnitude < 0.1 then
+							-- If it's the exact target, push them forward along the scrapper's dash path
+							pushDir = rootPart.CFrame.LookVector
+						end
+					end
+
+					CombatService.ApplyDamage(
+						player,
+						bModel,
+						"DashHit_" .. tostring(tick()),
+						config.Damage,
+						config.Knockback,
+						false,
+						pushDir
+					)
+				end
+			end
+
+			if enemiesStruck > 0 then
+				local addHeatEvent =
+					require(game:GetService("ReplicatedStorage").Shared.Remotes):GetEvent("AddScrapperHeat")
+				if addHeatEvent then
+					addHeatEvent:FireClient(player, enemiesStruck * 25)
+				end
+			end
+		end
+	end
 end
 
 --[[
@@ -685,6 +814,13 @@ function CombatService:Start()
 		print("[CombatService] Connected to RequestRangedHit remote")
 	else
 		warn("[CombatService] Failed to find RequestRangedHit remote!")
+	end
+
+	-- Connect to Dash Hit request remote
+	local requestDashHitRemote = Remotes:GetEvent("RequestDashHit")
+	if requestDashHitRemote then
+		requestDashHitRemote.OnServerEvent:Connect(onRequestDashHit)
+		print("[CombatService] Connected to RequestDashHit remote")
 	end
 
 	-- Cleanup when player leaves

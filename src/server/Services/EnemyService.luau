@@ -74,6 +74,7 @@ type EnemyData = {
 	LastPosTime: number?, -- For unstuck detection
 	AttackTriggered: boolean, -- Whether attack was triggered this attack state
 	CurrentAttack: any?, -- Selected attack data from config.Attacks (if multi-attack)
+	LastSpecialTimes: { [string]: number }, -- Track cooldowns for specific special attacks
 }
 
 -- AI update accumulator
@@ -490,7 +491,9 @@ local function performLeapAttack(enemyData: EnemyData)
 
 	-- Validate still alive
 	if not rootPart or not rootPart.Parent or enemyData.State == AIState.Dead then
-		if windupTrack then windupTrack:Stop() end
+		if windupTrack then
+			windupTrack:Stop()
+		end
 		return
 	end
 
@@ -498,7 +501,9 @@ local function performLeapAttack(enemyData: EnemyData)
 	-- PHASE 2: LAUNCH UP (rise straight up to peak height)
 	-- Start mid-air loop immediately as we launch
 	-- ================================================================
-	if windupTrack then windupTrack:Stop(0.1) end
+	if windupTrack then
+		windupTrack:Stop(0.1)
+	end
 
 	local midairTrack = nil
 	if attackData.MidairAnimId and enemyData.Animator then
@@ -527,7 +532,9 @@ local function performLeapAttack(enemyData: EnemyData)
 	while true do
 		local elapsed = tick() - launchStart
 		local t = math.clamp(elapsed / launchDuration, 0, 1)
-		if t >= 1 then break end
+		if t >= 1 then
+			break
+		end
 
 		-- Ease-out: fast at start, slows near peak
 		local easedT = 1 - (1 - t) * (1 - t)
@@ -551,7 +558,9 @@ local function performLeapAttack(enemyData: EnemyData)
 
 	-- Validate still alive
 	if not rootPart or not rootPart.Parent or enemyData.State == AIState.Dead then
-		if midairTrack then midairTrack:Stop() end
+		if midairTrack then
+			midairTrack:Stop()
+		end
 		rootPart.Anchored = wasAnchored
 		return
 	end
@@ -562,7 +571,9 @@ local function performLeapAttack(enemyData: EnemyData)
 	-- Get target's current position for landing
 	local targetPos = getTargetPosition(target)
 	if not targetPos then
-		if midairTrack then midairTrack:Stop() end
+		if midairTrack then
+			midairTrack:Stop()
+		end
 		rootPart.Anchored = wasAnchored
 		enemyData.State = AIState.Chase
 		return
@@ -947,23 +958,35 @@ local function updateEnemyAI(enemyData: EnemyData, deltaTime: number)
 				if config.Attacks and now - enemyData.LastAttackTime >= (config.AttackCooldown or 1.5) then
 					for _, atk in config.Attacks do
 						if atk.Type == "Leap" and atk.MinRange and atk.MaxRange then
-							if distance >= atk.MinRange and distance <= atk.MaxRange then
-								-- Trigger leap from chase distance!
-								enemyData.State = AIState.Attack
-								enemyData.LastAttackTime = now
-								enemyData.AttackTriggered = false
-								enemyData.IsMoving = false
-								enemyData.LastMoveTarget = nil
-								if enemyData.LinearVelocity then
-									enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+							local lastLeap = enemyData.LastSpecialTimes[atk.Name] or 0
+							local leapCd = atk.Cooldown or 10 -- Default 10s cooldown for leaps
+							if now - lastLeap >= leapCd then
+								if distance >= atk.MinRange and distance <= atk.MaxRange then
+									-- Roll chance to leap (so it's not 100% predictable)
+									local chance = atk.Chance or 0.5
+									if math.random() <= chance then
+										-- Trigger leap from chase distance!
+										enemyData.State = AIState.Attack
+										enemyData.LastAttackTime = now
+										enemyData.LastSpecialTimes[atk.Name] = now
+										enemyData.AttackTriggered = false
+										enemyData.IsMoving = false
+										enemyData.LastMoveTarget = nil
+										if enemyData.LinearVelocity then
+											enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+										end
+										if enemyData.WalkTrack and enemyData.WalkTrack.IsPlaying then
+											enemyData.WalkTrack:Stop(0.15)
+										end
+										-- Force-select the leap attack (CurrentAttack pre-set)
+										enemyData.CurrentAttack = atk
+										canLeap = true
+										break
+									else
+										-- Delay next chance roll by 1s so it doesn't spam 20 times a second
+										enemyData.LastSpecialTimes[atk.Name] = now - leapCd + 1.0
+									end
 								end
-								if enemyData.WalkTrack and enemyData.WalkTrack.IsPlaying then
-									enemyData.WalkTrack:Stop(0.15)
-								end
-								-- Force-select the leap attack (CurrentAttack pre-set)
-								enemyData.CurrentAttack = atk
-								canLeap = true
-								break
 							end
 						end
 					end
@@ -1328,6 +1351,7 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?)
 		IsMoving = false,
 		LastMoveTarget = nil,
 		AttackTriggered = false,
+		LastSpecialTimes = {},
 	}
 
 	activeEnemies[enemyModel] = enemyData

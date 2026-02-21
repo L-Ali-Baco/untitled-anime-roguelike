@@ -139,6 +139,13 @@ local function SkillSlot(scope, props)
 	-- Update timer
 	local hb = RunService.Heartbeat:Connect(function()
 		now:set(tick())
+		-- Local player attribute cooldown check (for Dash)
+		if props.Slot == "Dash" then
+			local endT = LocalPlayer:GetAttribute("DashCooldownEnd")
+			if endT and endT > peek(cooldownEnd) then
+				cooldownEnd:set(endT)
+			end
+		end
 	end)
 	table.insert(scope, hb)
 
@@ -189,6 +196,15 @@ local function SkillSlot(scope, props)
 				Size = UDim2.fromScale(1, 1),
 				BackgroundTransparency = 1,
 				Image = icon,
+				ImageColor3 = Computed(scope, function(use)
+					-- Special tint for active TripWire
+					if props.Slot == "Skill1" and use(props.ClassName) == "Scrapper" then
+						if LocalPlayer:GetAttribute("TripWireSpooling") then
+							return Color3.fromRGB(150, 255, 150) -- Green tint when spooling
+						end
+					end
+					return Color3.fromRGB(255, 255, 255)
+				end),
 			}),
 
 			-- Cooldown Overlay (Darkens icon)
@@ -244,9 +260,8 @@ function SkillBar.new(classController): () -> ()
 			local cls = classController:GetCurrentClass()
 			if cls == "Warrior" then
 				currentClassName:set("Vanguard")
-			end
-			if cls == "Gunner" then
-				currentClassName:set("Gunslinger")
+			else
+				currentClassName:set(cls)
 			end
 		end
 
@@ -254,9 +269,8 @@ function SkillBar.new(classController): () -> ()
 			print("[SkillBar] Class Changed:", cls)
 			if cls == "Warrior" then
 				currentClassName:set("Vanguard")
-			end
-			if cls == "Gunner" then
-				currentClassName:set("Gunslinger")
+			else
+				currentClassName:set(cls)
 			end
 		end)
 		table.insert(scope, conn)
@@ -299,34 +313,104 @@ function SkillBar.new(classController): () -> ()
 						HorizontalAlignment = Enum.HorizontalAlignment.Center,
 					}),
 
+					-- Passive (Scrapper)
+					scope:New("Frame")({
+						BackgroundTransparency = 1,
+						AutomaticSize = Enum.AutomaticSize.XY,
+						Visible = Computed(scope, function(use)
+							return use(getSkillProp("Passive", "Name")) ~= nil
+						end),
+						[Children] = {
+							SkillSlot(scope, {
+								Slot = "Passive",
+								ClassName = currentClassName,
+								SkillName = getSkillProp("Passive", "Name"),
+								Icon = getSkillProp("Passive", "Icon"),
+								Cooldown = getSkillProp("Passive", "Cooldown"),
+								Description = getSkillProp("Passive", "Description"),
+								Keybind = "PASSIVE",
+							}),
+						},
+					}),
+
 					-- M2 (Secondary)
-					SkillSlot(scope, {
-						Slot = "Secondary",
-						SkillName = getSkillProp("Secondary", "Name"),
-						Icon = getSkillProp("Secondary", "Icon"),
-						Cooldown = getSkillProp("Secondary", "Cooldown"),
-						Description = getSkillProp("Secondary", "Description"),
-						Keybind = "M2",
+					scope:New("Frame")({
+						BackgroundTransparency = 1,
+						AutomaticSize = Enum.AutomaticSize.XY,
+						Visible = Computed(scope, function(use)
+							return use(getSkillProp("Secondary", "Name")) ~= nil
+						end),
+						[Children] = {
+							SkillSlot(scope, {
+								Slot = "Secondary",
+								ClassName = currentClassName,
+								SkillName = getSkillProp("Secondary", "Name"),
+								Icon = getSkillProp("Secondary", "Icon"),
+								Cooldown = getSkillProp("Secondary", "Cooldown"),
+								Description = getSkillProp("Secondary", "Description"),
+								Keybind = "M2",
+							}),
+						},
 					}),
 
 					-- E (Skill1)
-					SkillSlot(scope, {
-						Slot = "Skill1",
-						SkillName = getSkillProp("Skill1", "Name"),
-						Icon = getSkillProp("Skill1", "Icon"),
-						Cooldown = getSkillProp("Skill1", "Cooldown"),
-						Description = getSkillProp("Skill1", "Description"),
-						Keybind = "E",
+					scope:New("Frame")({
+						BackgroundTransparency = 1,
+						AutomaticSize = Enum.AutomaticSize.XY,
+						Visible = Computed(scope, function(use)
+							return use(getSkillProp("Skill1", "Name")) ~= nil
+						end),
+						[Children] = {
+							SkillSlot(scope, {
+								Slot = "Skill1",
+								ClassName = currentClassName,
+								SkillName = getSkillProp("Skill1", "Name"),
+								Icon = getSkillProp("Skill1", "Icon"),
+								Cooldown = getSkillProp("Skill1", "Cooldown"),
+								Description = getSkillProp("Skill1", "Description"),
+								Keybind = "E",
+							}),
+						},
 					}),
 
 					-- R (Skill2)
-					SkillSlot(scope, {
-						Slot = "Skill2",
-						SkillName = getSkillProp("Skill2", "Name"),
-						Icon = getSkillProp("Skill2", "Icon"),
-						Cooldown = getSkillProp("Skill2", "Cooldown"),
-						Description = getSkillProp("Skill2", "Description"),
-						Keybind = "R",
+					scope:New("Frame")({
+						BackgroundTransparency = 1,
+						AutomaticSize = Enum.AutomaticSize.XY,
+						Visible = Computed(scope, function(use)
+							return use(getSkillProp("Skill2", "Name")) ~= nil
+						end),
+						[Children] = {
+							SkillSlot(scope, {
+								Slot = "Skill2",
+								ClassName = currentClassName,
+								SkillName = getSkillProp("Skill2", "Name"),
+								Icon = getSkillProp("Skill2", "Icon"),
+								Cooldown = getSkillProp("Skill2", "Cooldown"),
+								Description = getSkillProp("Skill2", "Description"),
+								Keybind = "R",
+							}),
+						},
+					}),
+
+					-- Dash
+					scope:New("Frame")({
+						BackgroundTransparency = 1,
+						AutomaticSize = Enum.AutomaticSize.XY,
+						Visible = Computed(scope, function(use)
+							return use(getSkillProp("Dash", "Name")) ~= nil
+						end),
+						[Children] = {
+							SkillSlot(scope, {
+								Slot = "Dash",
+								ClassName = currentClassName,
+								SkillName = getSkillProp("Dash", "Name"),
+								Icon = getSkillProp("Dash", "Icon"),
+								Cooldown = getSkillProp("Dash", "Cooldown"),
+								Description = getSkillProp("Dash", "Description"),
+								Keybind = "SHIFT",
+							}),
+						},
 					}),
 				},
 			}),

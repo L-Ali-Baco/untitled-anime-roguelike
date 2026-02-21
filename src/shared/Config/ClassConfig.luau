@@ -41,7 +41,7 @@ return {
 
 		AttackType = "Ranged",
 		BaseHealth = 80,
-		MoveSpeedMultiplier = 1.5, -- Slightly faster
+		MoveSpeedMultiplier = 1.6, -- Increased for better mobility
 
 		-- Custom character model settings
 		CustomModel = "Scrapper", -- Model name in ReplicatedStorage
@@ -89,6 +89,42 @@ return {
 			HitSparkEnabled = true,
 			HitSparkColor = Color3.fromRGB(255, 150, 50),
 			HitSparkCount = 4,
+		},
+
+		DashOverride = {
+			Cooldown = 3.0, -- Increased cooldown because it is a long slide now
+			SpeedMultiplier = 4.0, -- Faster than normal dash
+			Duration = 0.6, -- Much longer slide
+			IFrameDuration = 0.6, -- Full invincibility during the slide
+			StaminaCost = 0, -- Scrapper's dash doesn't consume stamina
+			SlideAnimationId = "rbxassetid://74001061463748", -- Custom slide pose
+		},
+		Skills = {
+			KineticScrubber = {
+				MaxHeat = 100,
+				HeatPerTick = 1.8, -- Heat gained per heartbeat while moving (slower)
+				DecayPerTick = 2, -- Heat lost when still
+				ShredDuration = 5.0, -- Seconds armor is broken
+				ShredAmount = 0.20, -- 20% more damage taken
+				Radius = 15, -- Shred AOE size matching shotgun range logic
+			},
+			TripWire = {
+				Damage = 80,
+				Knockback = 15,
+				MaxWireLength = 50, -- Max distance between nodes
+				ActivationDelay = 0.5, -- Time before laser goes live
+				HitTime = 0.1,
+				HitDuration = 0.5,
+				HitboxSize = Vector3.new(20, 10, 20), -- Massive shrapnel AOE (explosion size)
+				Hitstop = 0.15,
+				ScreenShake = 1.0,
+			},
+			ScavengersSlide = {
+				Knockback = 45, -- Massively increased knockback for physics push
+				Damage = 5, -- Light damage for passing through
+				AOERadius = 16, -- Radial blast around hit target
+				HitboxSize = Vector3.new(14, 8, 14), -- Checking around character (Larger to hit small targets)
+			},
 		},
 	},
 

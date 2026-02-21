@@ -18,7 +18,7 @@ export type CharacterStats = {
 export type CharacterData = {
 	id: string,
 	name: string,
-	archetype: "Vanguard" | "Gunslinger",
+	archetype: "Vanguard" | "Scrapper",
 	baseStats: CharacterStats,
 }
 

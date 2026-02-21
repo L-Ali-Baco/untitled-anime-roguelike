@@ -123,6 +123,8 @@ return {
 					Weight = 0.5, -- Less frequent than normal attacks
 					MinRange = 30, -- Gap-closer: only when player is far (beyond melee)
 					MaxRange = 60, -- Don't leap if too far
+					Cooldown = 12, -- 12 seconds cooldown between leaps
+					Chance = 0.6, -- 60% chance to jump when in range (prevents immediate predictability)
 				},
 			},
 
@@ -177,8 +179,8 @@ return {
 	-- Spawn settings
 	Spawn = {
 		SpawnTag = "EnemySpawnPoint", -- CollectionService tag for spawn locations
-		MinSpawnDistance = 25, -- Minimum distance from players to spawn
-		MaxSpawnDistance = 70, -- Maximum distance (within aggro range)
+		MinSpawnDistance = 80, -- Minimum distance from players to spawn (increased to prevent insta-aggro)
+		MaxSpawnDistance = 120, -- Maximum distance
 		DespawnDistance = 150, -- Distance at which enemies despawn (increased to match chase range)
 		RespawnDelay = 15, -- Seconds before spawn point can spawn again (was 10)
 	},

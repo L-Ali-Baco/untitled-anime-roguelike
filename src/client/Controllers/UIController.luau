@@ -112,6 +112,11 @@ function UIController:InitializeUI()
 		table.insert(uiCleanupFunctions, cleanupStaminaBar)
 	end
 
+	-- Create Heat Meter HUD (Scrapper only)
+	local HeatMeter = require(UI.HUD.HeatMeter)
+	local cleanupHeatMeter = HeatMeter.new()
+	table.insert(uiCleanupFunctions, cleanupHeatMeter)
+
 	-- Create Player Health Bar (Custom HUD)
 	local PlayerHealthBar = require(UI.HUD.PlayerHealthBar)
 	local cleanupHealthBar = PlayerHealthBar.new()

@@ -153,6 +153,11 @@ local function updateState(rootPart: BasePart, humanoid: Humanoid?, isMoving: bo
 		lastGroundedTime = os.clock()
 	end
 
+	-- Don't override externally set states (e.g. Dashing)
+	if currentState == CharacterState.Dashing then
+		return
+	end
+
 	-- Determine state
 	if not isGrounded then
 		local yVelocity = rootPart.AssemblyLinearVelocity.Y

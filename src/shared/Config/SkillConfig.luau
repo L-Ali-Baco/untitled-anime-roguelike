@@ -13,6 +13,11 @@ export type SkillDef = {
 	Range: number?, -- Studs
 	StaminaCost: number?,
 	AnimationId: string?,
+	MaxWireLength: number?,
+	Radius: number?,
+	Knockback: number?,
+	KnockbackForce: number?,
+	LungeForce: number?,
 }
 
 return {
@@ -53,37 +58,34 @@ return {
 	},
 
 	-- ==========================================
-	-- GUNSLINGER (Ranged)
+	-- SCRAPPER
 	-- ==========================================
-	Gunslinger = {
-		-- M2: Burst Damage
-		Secondary = {
-			Name = "Buckshot Blast",
-			Description = "SHOTGUN: Fires 5 bullets at once. Massive damage up close.",
-			Icon = "rbxassetid://6031071053", -- Placeholder: Shotgun
-			Cooldown = 6,
-			Damage = 0.6, -- Per bullet (5x = 300% total if all hit)
-			BulletCount = 5,
-			Spread = 25, -- Degrees
-		},
-		-- E: Utility / CC
-		Skill1 = {
-			Name = "Tether Mine",
-			Description = "TRAP: Throws a mine. After 1s, it PULLS all enemies into a group.",
-			Icon = "rbxassetid://6031097903", -- Placeholder: Trap
-			Cooldown = 14,
+	Scrapper = {
+		Dash = {
+			Name = "Scavenger's Slide",
+			Description = "A fast, low-profile slide that knocks back enemies on impact.",
+			Icon = "rbxassetid://13580556557", -- Dash icon
+			Cooldown = 3,
 			Damage = 1.0,
-			Radius = 25,
-			PullForce = 50,
+			KnockbackForce = 40,
+			LungeForce = 80,
 		},
-		-- R: Ultimate
-		Skill2 = {
-			Name = "Overclock",
-			Description = "BUFF: +50% Fire Rate and Infinite Ammo for 6 seconds.",
-			Icon = "rbxassetid://6034287594", -- Placeholder: Lightning
-			Cooldown = 25,
-			Duration = 6,
-			FireRateBuff = 1.5,
+		Skill1 = {
+			Name = "Trip-Wire Spool",
+			Description = "TRAP: Deploy a high-tension tripwire. Enemies crossing trigger a shrapnel explosion.",
+			Icon = "rbxassetid://6031097903", -- Trap
+			Cooldown = 8,
+			Range = 50,
+			MaxWireLength = 30,
+			Damage = 2.0,
+			Radius = 15,
+			Knockback = 65,
+		},
+		Passive = {
+			Name = "Kinetic Scrubber",
+			Description = "PASSIVE: Moving continuously builds Heat. At 100 Heat, your shots shred enemy armor.",
+			Icon = "rbxassetid://13799059639", -- Generic mechanic icon
+			Cooldown = 0,
 		},
 	},
 

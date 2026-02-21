@@ -191,14 +191,20 @@ end
 local function onDamageBlocked(data)
 	-- data = { Enemy, Position, DamageBlocked }
 
-	local _position = data.Position
+	local position = data.Position
 	local _damageBlocked = data.DamageBlocked
 
 	-- Visual feedback for dodge (flash screen edges or show "DODGE" text)
-	-- Could be implemented via ScreenEffects module
+	if DamageNumbers and position then
+		-- Spawn it slightly higher than typical damage numbers
+		DamageNumbers:SpawnText(position + Vector3.new(0, 3, 0), "DODGE!", "Dodge")
+	end
 
 	-- Brief slow-mo feel (optional - tiny hitstop for satisfaction)
-	-- This would call HitstopController if we want that feel
+	if ScreenShakeController then
+		-- A tiny, fast shake to emphasize the near-miss
+		ScreenShakeController:Shake(0.15, 0.1)
+	end
 end
 
 --[[

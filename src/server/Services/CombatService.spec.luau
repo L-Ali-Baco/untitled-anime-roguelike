@@ -19,6 +19,10 @@ return function()
 			-- Reset mocks
 			attacker = Instance.new("Player")
 			attacker.Name = "Attacker"
+			attacker.Character = Instance.new("Model")
+			local attackerRoot = Instance.new("Part")
+			attackerRoot.Name = "HumanoidRootPart"
+			attackerRoot.Parent = attacker.Character
 
 			target = Instance.new("Model")
 			target.Name = "Target"

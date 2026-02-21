@@ -4,7 +4,7 @@
     Uses Fusion 0.3 for reactive UI.
     
     Features:
-    - Two class buttons (Warrior / Gunner)
+    - Two class buttons (Warrior / Scrapper)
     - Class info display (name, description, icon)
     - Mobile-friendly large touch targets
     - Blocks gameplay input until a class is selected

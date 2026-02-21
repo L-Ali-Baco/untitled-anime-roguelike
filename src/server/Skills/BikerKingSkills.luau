@@ -144,7 +144,7 @@ function BikerKingSkills.FlameCircle(player: Player, skillData: any)
 	-- Pulse damage in ticks
 	task.spawn(function()
 		local ticks = math.floor(duration / tickRate)
-		for _ = 1, ticks do
+		for i = 1, ticks do
 			if not character or not character.Parent then
 				break
 			end

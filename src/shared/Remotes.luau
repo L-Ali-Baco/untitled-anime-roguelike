@@ -24,6 +24,7 @@ local REMOTE_EVENTS = {
 	"RequestSkill", -- Client -> Server: Request to use a skill (Slot: "Secondary", "Skill1", "Skill2")
 	"SkillUsed", -- Server -> Clients: Skill successfully used (for VFX/Cooldowns)
 	"SkillCooldown", -- Server -> Client: Skill failed/cooldown sync
+	"ShowDamageNumber", -- Server -> All Clients: Display damage number on target
 
 	-- Enemy AI
 	"EnemyAttack", -- Server -> Clients: Enemy attacked a player (for VFX)
@@ -33,10 +34,18 @@ local REMOTE_EVENTS = {
 	-- Player State
 	"IFrameStateChanged", -- Client -> Server: Player I-frame state changed (for dodge)
 	"DamageBlocked", -- Server -> Client: Damage was blocked by I-frames (for VFX)
+	"RequestDashHit", -- Client -> Server: Dash collision (Scavenger's Slide)
+	"RequestTripWire", -- Client -> Server: Start/End spooling Trip Wire
 
 	-- World Objectives
 	"BeaconStateChanged", -- Server -> All Clients: Beacon changed state (Active, Charging, Completed)
 	"BeaconProgressUpdated", -- Server -> All Clients: Current charge percentage
+
+	-- Class System
+	"SelectClass", -- Client -> Server: Player selected a class
+	"ClassSelected", -- Server -> Client: Confirm class selection
+	"PlayerClassChanged", -- Server -> All Clients: Broadcast player's class (for visuals)
+	"AddScrapperHeat", -- Server -> Client: Grant bonus heat to Scrapper
 
 	-- Loot System
 	"GrantItem", -- Server -> Client: Notifies player of item gained

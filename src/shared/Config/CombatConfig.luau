@@ -81,7 +81,7 @@ return {
 	-- Auto-targeting (soft lock)
 	Targeting = {
 		Enabled = true,
-		MaxRange = 40, -- Maximum targeting range in studs (synced with Gunner range)
+		MaxRange = 40, -- Maximum targeting range in studs (synced with Scrapper range)
 		ConeAngle = 360, -- Degrees - 360 means target nearest regardless of direction
 		SoftLockStrength = 1.0, -- How much attacks rotate toward target (1.0 = full lock)
 		UpdateInterval = 0.05, -- How often to update target (faster)

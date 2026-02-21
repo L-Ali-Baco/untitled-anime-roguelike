@@ -737,7 +737,15 @@ local function performRangedAttack()
 	if didHit and hitTarget then
 		if Remotes and Remotes.RequestRangedHit then
 			local attackId = LocalPlayer.UserId .. "_R_" .. rangedAttackIdCounter
-			Remotes.RequestRangedHit:FireServer(hitTarget, hitPosition, attackId)
+			local heatCharge = LocalPlayer:GetAttribute("HeatCharge") or 0
+			local isShredShot = heatCharge >= 100
+			Remotes.RequestRangedHit:FireServer(hitTarget, hitPosition, attackId, isShredShot)
+
+			if isShredShot then
+				-- Reset heat and add a 2.5 second cooldown before it can build again
+				LocalPlayer:SetAttribute("HeatCharge", 0)
+				LocalPlayer:SetAttribute("HeatResetTime", tick() + 2.5)
+			end
 
 			-- Light hitstop and screen shake for feedback
 			if HitstopController and rangedData.Hitstop then
@@ -1230,6 +1238,17 @@ function CombatController:Start()
 						end
 					end
 					CombatEffects:SpawnHitEffects(hitData.HitPosition, nil, hitData.AttackIndex)
+				end
+			end)
+		)
+	end
+
+	if Remotes and Remotes.ShowDamageNumber then
+		table.insert(
+			connections,
+			Remotes.ShowDamageNumber.OnClientEvent:Connect(function(target, damage, damageType)
+				if DamageNumbers then
+					DamageNumbers:SpawnOnCharacter(target, damage, damageType)
 				end
 			end)
 		)

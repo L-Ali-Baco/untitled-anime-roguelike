@@ -31,7 +31,7 @@ local Config = {
 	BarPixelHeight = 8, -- Actual pixel height of the bar
 
 	-- Visibility
-	MaxDistance = 100, -- Increased to accommodate ranged classes (Gunner 60 range)
+	MaxDistance = 100, -- Increased to accommodate ranged classes (Scrapper 60 range)
 	FadeStartDistance = 80, -- Start fading further out
 	ShowWhenFullHealth = true, -- Always show bars so players can see enemy types/positions
 	FadeInTime = 0.15,

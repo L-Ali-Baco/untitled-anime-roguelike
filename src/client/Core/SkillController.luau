@@ -37,8 +37,6 @@ local function playLocalFeedback(slot)
 		local cls = ClassController:GetCurrentClass()
 		if cls == "Warrior" then
 			className = "Vanguard"
-		elseif cls == "Gunner" then
-			className = "Gunslinger"
 		else
 			-- Use class name directly (BikerKing, etc.)
 			className = cls
