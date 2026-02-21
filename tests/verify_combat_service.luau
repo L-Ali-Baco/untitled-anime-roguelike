@@ -16,11 +16,37 @@ local task = require("@lune/task")
 local MockInstances = {}
 local MockModules = {}
 
+local Vector3_Impl = {
+	new = function(x,y,z)
+		local v = {X=x or 0,Y=y or 0,Z=z or 0}
+		v.Magnitude = math.sqrt(v.X*v.X+v.Y*v.Y+v.Z*v.Z)
+		v.Unit = {X=0,Y=0,Z=0}
+		if v.Magnitude > 0 then
+			v.Unit = {X=v.X/v.Magnitude, Y=v.Y/v.Magnitude, Z=v.Z/v.Magnitude}
+		end
+		setmetatable(v, {
+			__add = function(a,b) return Vector3_Impl.new(a.X+b.X, a.Y+b.Y, a.Z+b.Z) end,
+			__sub = function(a,b) return Vector3_Impl.new(a.X-b.X, a.Y-b.Y, a.Z-b.Z) end,
+			__mul = function(a,b)
+				if type(b) == "number" then return Vector3_Impl.new(a.X*b, a.Y*b, a.Z*b) end
+				return Vector3_Impl.new(a.X*b.X, a.Y*b.Y, a.Z*b.Z)
+			end,
+			__tostring = function(a) return string.format("%f, %f, %f", a.X, a.Y, a.Z) end
+		})
+		return v
+	end,
+	zero = {X=0,Y=0,Z=0}
+}
+Vector3_Impl.zero = Vector3_Impl.new(0,0,0)
+
+-- Map to global Vector3 for this script
+local Vector3 = Vector3_Impl
+
 local function createMockInstance(className, name)
 	local self = {
 		ClassName = className,
 		Name = name or className,
-		Parent = nil,
+		_parent = nil,
 		_children = {},
 		_attributes = {},
 		_tags = {},
@@ -60,6 +86,31 @@ local function createMockInstance(className, name)
 	function self:Destroy()
 		self.Parent = nil
 	end
+
+	setmetatable(self, {
+		__index = function(t, k)
+			if k == "Parent" then return rawget(t, "_parent") end
+			return t._children[k]
+		end,
+		__newindex = function(t, k, v)
+			if k == "Parent" then
+				local oldParent = rawget(t, "_parent")
+				if oldParent == v then return end
+
+				if oldParent and oldParent._children then
+					oldParent._children[t.Name] = nil
+				end
+
+				rawset(t, "_parent", v)
+
+				if v and v._children then
+					v._children[t.Name] = t
+				end
+			else
+				rawset(t, k, v)
+			end
+		end
+	})
 
 	-- Humanoid specific
 	if className == "Humanoid" then
@@ -102,7 +153,30 @@ local CollectionService = {
 	end
 }
 
+local RunService = {
+	Heartbeat = {
+		Connect = function(self, cb)
+			_G._heartbeatCallback = cb
+			return { Disconnect = function() end }
+		end
+	}
+}
+
+function game:GetService(service)
+	if service == "Players" then
+		return self._children["Players"]
+	elseif service == "ReplicatedStorage" then
+		return self._children["ReplicatedStorage"]
+	elseif service == "CollectionService" then
+		return CollectionService
+	elseif service == "RunService" then
+		return RunService
+	end
+	return self._children[service]
+end
+
 local Players = createMockInstance("Players", "Players")
+Players.PlayerRemoving = { Connect = function() end }
 game._children["Players"] = Players
 
 -- Setup Folder Structure for require paths
@@ -126,6 +200,9 @@ Shared._children["Lib"] = LibFolder
 
 local StatLibModule = createMockInstance("ModuleScript", "StatLib")
 LibFolder._children["StatLib"] = StatLibModule
+
+local EnemyLibModule = createMockInstance("ModuleScript", "EnemyLib")
+LibFolder._children["EnemyLib"] = EnemyLibModule
 
 -- Helper to set mock module data
 local function registerMockModule(instance, data)
@@ -151,6 +228,32 @@ local MockStatLib = {
 	end
 }
 registerMockModule(StatLibModule, MockStatLib)
+
+local MockEnemyLib = {
+	IsAlive = function(self, target)
+		if not target then return false end
+		local hum = target:FindFirstChildOfClass("Humanoid")
+		if hum then return hum.Health > 0 end
+		return (target:GetAttribute("Health") or 0) > 0
+	end,
+	GetHealth = function(self, target)
+		if not target then return 0 end
+		local hum = target:FindFirstChildOfClass("Humanoid")
+		if hum then return hum.Health end
+		return target:GetAttribute("Health") or 0
+	end,
+	TakeDamage = function(self, target, amount)
+		if not target then return end
+		local hum = target:FindFirstChildOfClass("Humanoid")
+		if hum then
+			hum:TakeDamage(amount)
+		else
+			local hp = target:GetAttribute("Health") or 0
+			target:SetAttribute("Health", math.max(0, hp - amount))
+		end
+	end
+}
+registerMockModule(EnemyLibModule, MockEnemyLib)
 
 local MockRemotes = {
 	GetEvent = function() return { FireAllClients = function() end, OnServerEvent = { Connect = function() end } } end,
@@ -182,12 +285,18 @@ local MockClassService = {
 }
 registerMockModule(ClassServiceModule, MockClassService)
 
+local ItemServiceModule = createMockInstance("ModuleScript", "ItemService")
+local MockItemService = {
+	GetPlayerInventory = function(self, player) return {} end
+}
+registerMockModule(ItemServiceModule, MockItemService)
+
 
 -- GLOBALS
 local _G = {
 	game = game,
 	Instance = { new = Instance_new },
-	Vector3 = { new = function(x,y,z) return {X=x,Y=y,Z=z, Magnitude=math.sqrt(x*x+y*y+z*z), Unit={X=0,Y=0,Z=0}} end, zero = {X=0,Y=0,Z=0} },
+	Vector3 = Vector3_Impl,
 	task = { delay = function(t, f) f() end, wait = function() end },
 	tick = os.clock,
 	math = math,
@@ -196,21 +305,6 @@ local _G = {
 	typeof = typeof,
 	type = type,
 }
-_G.Vector3.new = function(x,y,z)
-	local v = {X=x,Y=y,Z=z}
-	v.Magnitude = math.sqrt(x*x+y*y+z*z)
-	v.Unit = v -- Simplification
-	setmetatable(v, {
-		__add = function(a,b) return _G.Vector3.new(a.X+b.X, a.Y+b.Y, a.Z+b.Z) end,
-		__sub = function(a,b) return _G.Vector3.new(a.X-b.X, a.Y-b.Y, a.Z-b.Z) end,
-		__mul = function(a,b)
-			if type(b) == "number" then return _G.Vector3.new(a.X*b, a.Y*b, a.Z*b) end
-			return _G.Vector3.new(a.X*b.X, a.Y*b.Y, a.Z*b.Z)
-		end
-	})
-	return v
-end
-_G.Vector3.zero = _G.Vector3.new(0,0,0)
 
 -- Global require interceptor
 local function mockRequire(module)
@@ -300,6 +394,7 @@ local function loadScript(path, env)
 		-- Add ProcService to Services so `script.Parent.ProcService` works
 		newEnv.script.Parent._children["ProcService"] = ProcServiceModule
 		newEnv.script.Parent._children["ClassService"] = ClassServiceModule
+		newEnv.script.Parent._children["ItemService"] = ItemServiceModule
 	end
 
 	if path:find("CombatService.spec.luau") then
@@ -324,6 +419,8 @@ end
 print("Loading CombatService...")
 local combatServiceChunk = loadScript("src/server/Services/CombatService.luau")
 local CombatService = combatServiceChunk()
+
+CombatService:Start()
 
 -- Register it for the spec to find
 local CombatServiceModule = createMockInstance("ModuleScript", "CombatService")

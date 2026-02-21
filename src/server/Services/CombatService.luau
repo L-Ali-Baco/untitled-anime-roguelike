@@ -43,8 +43,11 @@ local playerLastAttackId: { [Player]: string } = {}
 
 -- Track hits per attack to prevent duplicate damage
 local attackHitTargets: { [string]: { [Model]: boolean } } = {}
--- OPTIMIZATION: Centralized queue for attack cleanup to reduce scheduler overhead
-local activeAttacks: { { id: string, expiry: number } } = {}
+-- OPTIMIZATION: Centralized queue for attack cleanup to reduce scheduler overhead.
+-- Using pointer-based queue for O(1) removal instead of table.remove/table.move which is O(n).
+local activeAttacks: { [number]: { id: string, expiry: number } } = {}
+local activeAttacksHead = 1
+local activeAttacksTail = 0
 
 -- Track combo state per player to prevent sequence exploits (e.g. skipping to attack 3)
 local playerComboState: { [Player]: { CurrentIndex: number, LastAttackTime: number } } = {}
@@ -446,7 +449,8 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 
 	-- Cleanup attack hit tracking after a short delay
 	-- OPTIMIZATION: Use centralized queue instead of task.delay to reduce scheduler overhead
-	table.insert(activeAttacks, { id = attackId, expiry = tick() + 1 })
+	activeAttacksTail += 1
+	activeAttacks[activeAttacksTail] = { id = attackId, expiry = tick() + 1 }
 end
 
 -- ============================================================================
@@ -613,7 +617,8 @@ local function onRequestRangedHit(player: Player, targetModel: Model?, hitPositi
 
 	-- Cleanup attack hit tracking after a short delay
 	-- OPTIMIZATION: Use centralized queue instead of task.delay to reduce scheduler overhead
-	table.insert(activeAttacks, { id = attackId, expiry = tick() + 0.5 })
+	activeAttacksTail += 1
+	activeAttacks[activeAttacksTail] = { id = attackId, expiry = tick() + 0.5 }
 end
 
 --[[
@@ -636,33 +641,30 @@ function CombatService:Start()
 	-- OPTIMIZATION: Batch cleanup operations to reduce scheduler overhead
 	RunService.Heartbeat:Connect(function()
 		local now = tick()
-		local removeCount = 0
 
-		-- Count how many items to remove (FIFO)
-		for _, entry in ipairs(activeAttacks) do
+		-- Process queue from head (oldest) to tail (newest)
+		-- O(1) removal by just incrementing head pointer
+		while activeAttacksHead <= activeAttacksTail do
+			local entry = activeAttacks[activeAttacksHead]
+
 			if now >= entry.expiry then
 				-- Cleanup hit tracking data
 				attackHitTargets[entry.id] = nil
-				removeCount += 1
+
+				-- Clear reference to allow GC
+				activeAttacks[activeAttacksHead] = nil
+				activeAttacksHead += 1
 			else
-				-- If oldest entry hasn't expired, newer ones won't either (assuming FIFO insertion)
+				-- Since we insert in chronological order, if the oldest hasn't expired,
+				-- none of the newer ones have either.
 				break
 			end
 		end
 
-		if removeCount > 0 then
-			local newSize = #activeAttacks - removeCount
-			if newSize > 0 then
-				-- Shift remaining items to the front (O(n) instead of O(k*n))
-				table.move(activeAttacks, removeCount + 1, #activeAttacks, 1)
-				-- Clear the old slots at the end
-				for i = newSize + 1, #activeAttacks do
-					activeAttacks[i] = nil
-				end
-			else
-				-- List is empty, just clear it
-				table.clear(activeAttacks)
-			end
+		-- Optional: Reset indices if empty to prevent integer overflow (though unlikely with Luau numbers)
+		if activeAttacksHead > activeAttacksTail then
+			activeAttacksHead = 1
+			activeAttacksTail = 0
 		end
 	end)
 
