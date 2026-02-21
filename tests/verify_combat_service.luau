@@ -16,14 +16,34 @@ local task = require("@lune/task")
 local MockInstances = {}
 local MockModules = {}
 
+local Vector3
+Vector3 = {
+	new = function(x,y,z)
+		local v = {X=x,Y=y,Z=z}
+		v.Magnitude = math.sqrt(x*x+y*y+z*z)
+		v.Unit = v -- Simplification
+		setmetatable(v, {
+			__add = function(a,b) return Vector3.new(a.X+b.X, a.Y+b.Y, a.Z+b.Z) end,
+			__sub = function(a,b) return Vector3.new(a.X-b.X, a.Y-b.Y, a.Z-b.Z) end,
+			__mul = function(a,b)
+				if type(b) == "number" then return Vector3.new(a.X*b, a.Y*b, a.Z*b) end
+				return Vector3.new(a.X*b.X, a.Y*b.Y, a.Z*b.Z)
+			end
+		})
+		return v
+	end,
+	zero = {X=0,Y=0,Z=0}
+}
+Vector3.zero = Vector3.new(0,0,0)
+
 local function createMockInstance(className, name)
 	local self = {
 		ClassName = className,
 		Name = name or className,
-		Parent = nil,
 		_children = {},
 		_attributes = {},
 		_tags = {},
+		_Parent = nil,
 	}
 
 	function self:FindFirstChild(n)
@@ -61,6 +81,27 @@ local function createMockInstance(className, name)
 		self.Parent = nil
 	end
 
+	setmetatable(self, {
+		__index = function(t, k)
+			if k == "Parent" then return t._Parent end
+			return t._children[k]
+		end,
+		__newindex = function(t, k, v)
+			if k == "Parent" then
+				local oldParent = t._Parent
+				if oldParent and oldParent._children then
+					oldParent._children[t.Name] = nil
+				end
+				t._Parent = v
+				if v and v._children then
+					v._children[t.Name] = t
+				end
+			else
+				rawset(t, k, v)
+			end
+		end
+	})
+
 	-- Humanoid specific
 	if className == "Humanoid" then
 		self.Health = 100
@@ -88,6 +129,17 @@ end
 
 -- Global Mocks
 local game = createMockInstance("DataModel", "Game")
+
+function game:GetService(serviceName)
+	if self._children[serviceName] then
+		return self._children[serviceName]
+	end
+	-- Create on demand if not exists (mock behavior)
+	local service = createMockInstance(serviceName, serviceName)
+	self._children[serviceName] = service
+	service.Parent = self
+	return service
+end
 
 local ReplicatedStorage = createMockInstance("ReplicatedStorage", "ReplicatedStorage")
 game._children["ReplicatedStorage"] = ReplicatedStorage
@@ -127,6 +179,9 @@ Shared._children["Lib"] = LibFolder
 local StatLibModule = createMockInstance("ModuleScript", "StatLib")
 LibFolder._children["StatLib"] = StatLibModule
 
+local EnemyLibModule = createMockInstance("ModuleScript", "EnemyLib")
+LibFolder._children["EnemyLib"] = EnemyLibModule
+
 -- Helper to set mock module data
 local function registerMockModule(instance, data)
 	MockModules[instance] = data
@@ -151,6 +206,27 @@ local MockStatLib = {
 	end
 }
 registerMockModule(StatLibModule, MockStatLib)
+
+local MockEnemyLib = {
+	IsAlive = function(self, target)
+		-- Simple mock: check if humanoid exists and health > 0
+		if not target then return false end
+		local humanoid = target:FindFirstChildOfClass("Humanoid")
+		return humanoid and humanoid.Health > 0
+	end,
+	TakeDamage = function(self, target, amount)
+		if not target then return end
+		local humanoid = target:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid:TakeDamage(amount)
+		end
+	end,
+	GetHealth = function(self, target)
+		local humanoid = target and target:FindFirstChildOfClass("Humanoid")
+		return humanoid and humanoid.Health or 0
+	end,
+}
+registerMockModule(EnemyLibModule, MockEnemyLib)
 
 local MockRemotes = {
 	GetEvent = function() return { FireAllClients = function() end, OnServerEvent = { Connect = function() end } } end,
@@ -182,12 +258,19 @@ local MockClassService = {
 }
 registerMockModule(ClassServiceModule, MockClassService)
 
+-- Mock ItemService
+local ItemServiceModule = createMockInstance("ModuleScript", "ItemService")
+local MockItemService = {
+	GetPlayerInventory = function() return {} end
+}
+registerMockModule(ItemServiceModule, MockItemService)
+
 
 -- GLOBALS
 local _G = {
 	game = game,
 	Instance = { new = Instance_new },
-	Vector3 = { new = function(x,y,z) return {X=x,Y=y,Z=z, Magnitude=math.sqrt(x*x+y*y+z*z), Unit={X=0,Y=0,Z=0}} end, zero = {X=0,Y=0,Z=0} },
+	Vector3 = Vector3,
 	task = { delay = function(t, f) f() end, wait = function() end },
 	tick = os.clock,
 	math = math,
@@ -196,21 +279,6 @@ local _G = {
 	typeof = typeof,
 	type = type,
 }
-_G.Vector3.new = function(x,y,z)
-	local v = {X=x,Y=y,Z=z}
-	v.Magnitude = math.sqrt(x*x+y*y+z*z)
-	v.Unit = v -- Simplification
-	setmetatable(v, {
-		__add = function(a,b) return _G.Vector3.new(a.X+b.X, a.Y+b.Y, a.Z+b.Z) end,
-		__sub = function(a,b) return _G.Vector3.new(a.X-b.X, a.Y-b.Y, a.Z-b.Z) end,
-		__mul = function(a,b)
-			if type(b) == "number" then return _G.Vector3.new(a.X*b, a.Y*b, a.Z*b) end
-			return _G.Vector3.new(a.X*b.X, a.Y*b.Y, a.Z*b.Z)
-		end
-	})
-	return v
-end
-_G.Vector3.zero = _G.Vector3.new(0,0,0)
 
 -- Global require interceptor
 local function mockRequire(module)
@@ -300,6 +368,7 @@ local function loadScript(path, env)
 		-- Add ProcService to Services so `script.Parent.ProcService` works
 		newEnv.script.Parent._children["ProcService"] = ProcServiceModule
 		newEnv.script.Parent._children["ClassService"] = ClassServiceModule
+		newEnv.script.Parent._children["ItemService"] = ItemServiceModule
 	end
 
 	if path:find("CombatService.spec.luau") then
