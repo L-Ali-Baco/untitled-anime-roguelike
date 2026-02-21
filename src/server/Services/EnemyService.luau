@@ -425,42 +425,18 @@ end
     Phase 3: Horizontal flight (mid-air loop anim, fly toward target's position)
     Phase 4: Landing slam (slam anim, AoE damage at impact)
 ]]
-local function performLeapAttack(enemyData: EnemyData)
-	if not enemyData.Target then
-		return
-	end
-
-	local target = enemyData.Target
-	local attackData = enemyData.CurrentAttack
-	if not attackData then
-		return
-	end
-
+--[[
+	Phase 1: Wind-up
+	Face target, play animation, wait.
+]]
+local function leapPhaseWindup(enemyData: EnemyData, attackData: any, target: Player): boolean
 	local windupDuration = attackData.WindupDuration or 1.2
-	local launchDuration = attackData.LaunchDuration or 0.5
-	local flightDuration = attackData.FlightDuration or 0.6
-	local flightHeight = attackData.FlightHeight or 40
-	local landDuration = attackData.LandDuration or 0.8
 	local attackDamage = attackData.Damage or 25
-	local hitRadius = attackData.HitRadius or 20
-	local vfxType = attackData.VFXType or "LeapSlam"
-
 	local rootPart = enemyData.RootPart
-	if not rootPart or not rootPart.Parent then
-		return
-	end
-
-	-- Stop all movement
-	if enemyData.LinearVelocity then
-		enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
-	end
 
 	-- Face target before wind-up
 	faceTarget(enemyData)
 
-	-- ================================================================
-	-- PHASE 1: WIND-UP (crouch/anticipation)
-	-- ================================================================
 	local windupTrack = nil
 	if attackData.WindupAnimId and enemyData.Animator then
 		pcall(function()
@@ -490,15 +466,27 @@ local function performLeapAttack(enemyData: EnemyData)
 
 	-- Validate still alive
 	if not rootPart or not rootPart.Parent or enemyData.State == AIState.Dead then
-		if windupTrack then windupTrack:Stop() end
-		return
+		if windupTrack then
+			windupTrack:Stop()
+		end
+		return false
 	end
 
-	-- ================================================================
-	-- PHASE 2: LAUNCH UP (rise straight up to peak height)
-	-- Start mid-air loop immediately as we launch
-	-- ================================================================
-	if windupTrack then windupTrack:Stop(0.1) end
+	if windupTrack then
+		windupTrack:Stop(0.1)
+	end
+	return true
+end
+
+--[[
+	Phase 2: Launch UP
+	Rise straight up, start midair anim, anchor root part.
+	Returns: success, midairTrack, wasAnchored
+]]
+local function leapPhaseLaunch(enemyData: EnemyData, attackData: any): (boolean, AnimationTrack?, boolean)
+	local launchDuration = attackData.LaunchDuration or 0.5
+	local flightHeight = attackData.FlightHeight or 40
+	local rootPart = enemyData.RootPart
 
 	local midairTrack = nil
 	if attackData.MidairAnimId and enemyData.Animator then
@@ -527,7 +515,9 @@ local function performLeapAttack(enemyData: EnemyData)
 	while true do
 		local elapsed = tick() - launchStart
 		local t = math.clamp(elapsed / launchDuration, 0, 1)
-		if t >= 1 then break end
+		if t >= 1 then
+			break
+		end
 
 		-- Ease-out: fast at start, slows near peak
 		local easedT = 1 - (1 - t) * (1 - t)
@@ -551,25 +541,39 @@ local function performLeapAttack(enemyData: EnemyData)
 
 	-- Validate still alive
 	if not rootPart or not rootPart.Parent or enemyData.State == AIState.Dead then
-		if midairTrack then midairTrack:Stop() end
+		if midairTrack then
+			midairTrack:Stop()
+		end
 		rootPart.Anchored = wasAnchored
-		return
+		return false, nil, wasAnchored
 	end
 
-	-- ================================================================
-	-- PHASE 3: HORIZONTAL FLIGHT (fly toward target with loop anim)
-	-- ================================================================
+	return true, midairTrack, wasAnchored
+end
+
+--[[
+	Phase 3: Horizontal Flight
+	Fly toward target position.
+	Returns: success, landingPos
+]]
+local function leapPhaseFlight(
+	enemyData: EnemyData,
+	attackData: any,
+	target: Player,
+	midairTrack: AnimationTrack?
+): (boolean, Vector3?)
+	local flightDuration = attackData.FlightDuration or 0.6
+	local rootPart = enemyData.RootPart
+
 	-- Get target's current position for landing
 	local targetPos = getTargetPosition(target)
 	if not targetPos then
-		if midairTrack then midairTrack:Stop() end
-		rootPart.Anchored = wasAnchored
-		enemyData.State = AIState.Chase
-		return
+		return false, nil
 	end
 
 	local flightStartPos = rootPart.Position -- At peak height
 	local landingPos = targetPos -- Target's ground position
+
 	-- Fly from peak height down toward landing position
 	local flightStart = tick()
 	while true do
@@ -602,13 +606,31 @@ local function performLeapAttack(enemyData: EnemyData)
 		task.wait()
 	end
 
-	-- ================================================================
-	-- PHASE 4: LANDING SLAM
-	-- ================================================================
+	return true, landingPos
+end
+
+--[[
+	Phase 4: Landing Slam
+	Impact, VFX, Damage, Cleanup.
+]]
+local function leapPhaseLanding(
+	enemyData: EnemyData,
+	attackData: any,
+	target: Player,
+	landingPos: Vector3,
+	midairTrack: AnimationTrack?,
+	wasAnchored: boolean
+)
+	local landDuration = attackData.LandDuration or 0.8
+	local attackDamage = attackData.Damage or 25
+	local hitRadius = attackData.HitRadius or 20
+	local vfxType = attackData.VFXType or "LeapSlam"
+	local rootPart = enemyData.RootPart
+
 	-- Restore physics
 	rootPart.Anchored = wasAnchored
 
-	-- Stop mid-air anim, play landing slam
+	-- Stop mid-air anim
 	if midairTrack then
 		midairTrack:Stop(0.1)
 	end
@@ -636,6 +658,7 @@ local function performLeapAttack(enemyData: EnemyData)
 		* CFrame.Angles(0, select(2, rootPart.CFrame:ToEulerAnglesYXZ()), 0)
 
 	-- Fire landing VFX event
+	local enemyAttackRemote = Remotes:GetEvent("EnemyAttack")
 	if enemyAttackRemote then
 		enemyAttackRemote:FireAllClients({
 			Enemy = enemyData.Model,
@@ -720,6 +743,62 @@ local function performLeapAttack(enemyData: EnemyData)
 			end
 		end
 	end)
+end
+
+--[[
+    Perform a leap attack (multi-phase gap-closer)
+    Orchestrates the 4 phases: Windup -> Launch -> Flight -> Landing
+]]
+local function performLeapAttack(enemyData: EnemyData)
+	if not enemyData.Target then
+		return
+	end
+
+	local target = enemyData.Target
+	local attackData = enemyData.CurrentAttack
+	if not attackData then
+		return
+	end
+
+	local rootPart = enemyData.RootPart
+	if not rootPart or not rootPart.Parent then
+		return
+	end
+
+	-- Stop all movement
+	if enemyData.LinearVelocity then
+		enemyData.LinearVelocity.PlaneVelocity = Vector2.zero
+	end
+
+	-- Phase 1: Wind-up
+	local successWindup = leapPhaseWindup(enemyData, attackData, target)
+	if not successWindup then
+		return
+	end
+
+	-- Phase 2: Launch UP
+	local successLaunch, midairTrack, wasAnchored = leapPhaseLaunch(enemyData, attackData)
+	if not successLaunch then
+		-- Cleanup already handled in Launch if it failed
+		return
+	end
+
+	-- Phase 3: Horizontal Flight
+	local successFlight, landingPos = leapPhaseFlight(enemyData, attackData, target, midairTrack)
+	if not successFlight then
+		-- Manually cleanup if flight failed (e.g. target lost)
+		if midairTrack then
+			midairTrack:Stop()
+		end
+		enemyData.RootPart.Anchored = wasAnchored
+		if enemyData.State ~= AIState.Dead then
+			enemyData.State = AIState.Chase
+		end
+		return
+	end
+
+	-- Phase 4: Landing Slam
+	leapPhaseLanding(enemyData, attackData, target, landingPos, midairTrack, wasAnchored)
 end
 
 --[[
