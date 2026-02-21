@@ -39,31 +39,12 @@ function StaminaBar.new(staminaController: any): () -> ()
 	-- State
 	local staminaPercent = scope:Value(1)
 	local isLowStamina = scope:Value(false)
-	local isActionFailed = scope:Value(false)
 	local isFlashActive = scope:Value(false)
 
 	-- Listen to stamina changes
 	local connection = staminaController.OnStaminaChanged:Connect(function(current, max, percent)
 		staminaPercent:set(percent)
 		isLowStamina:set(percent <= StaminaConfig.LowStaminaThreshold)
-	end)
-
-	-- Listen to action failed
-	local failConnection = staminaController.OnStaminaActionFailed:Connect(function()
-		isActionFailed:set(true)
-
-		-- Play sound
-		local sound = Instance.new("Sound")
-		sound.SoundId = "rbxassetid://4612375233"
-		sound.Volume = 0.5
-		sound.Parent = SoundService
-		sound:Play()
-		Debris:AddItem(sound, 1)
-
-		-- Reset visual after delay
-		task.delay(0.3, function()
-			isActionFailed:set(false)
-		end)
 	end)
 
 	-- Listen to stamina failure (feedback)
@@ -88,9 +69,6 @@ function StaminaBar.new(staminaController: any): () -> ()
 	local barColor = Computed(scope, function(use)
 		if use(isFlashActive) then
 			return StaminaConfig.Feedback.FailureFlashColor
-		end
-		if use(isActionFailed) then
-			return Color3.fromRGB(255, 50, 50) -- Red when failed
 		end
 		if use(isLowStamina) then
 			return Color3.fromRGB(255, 150, 50) -- Orange when low
@@ -204,7 +182,6 @@ function StaminaBar.new(staminaController: any): () -> ()
 	-- Return cleanup function
 	return function()
 		connection:Disconnect()
-		failConnection:Disconnect()
 		failureConnection:Disconnect()
 		Fusion.doCleanup(scope)
 	end
