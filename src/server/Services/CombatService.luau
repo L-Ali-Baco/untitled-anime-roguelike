@@ -230,8 +230,8 @@ local function applyKnockback(attacker: Model, target: Model, knockbackForce: nu
 
 	-- Calculate knockback velocity (smaller values work better with Humanoid)
 	-- knockbackForce is typically 5-12, so multiply by 2-3 for reasonable push
-	local knockbackSpeed = knockbackForce * 2.5
-	local upwardPop = 3 -- Small upward component for visual "hit" feel
+	local knockbackSpeed = knockbackForce * CombatConfig.Knockback.SpeedMultiplier
+	local upwardPop = CombatConfig.Knockback.UpwardForce -- Small upward component for visual "hit" feel
 
 	local knockbackVelocity = direction * knockbackSpeed + Vector3.new(0, upwardPop, 0)
 

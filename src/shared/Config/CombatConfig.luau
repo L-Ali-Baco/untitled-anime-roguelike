@@ -14,6 +14,12 @@ return {
 		CanDashCancel = true, -- Whether dash can cancel attacks
 	},
 
+	-- Knockback settings
+	Knockback = {
+		SpeedMultiplier = 2.5, -- Multiplier for knockback force
+		UpwardForce = 3, -- Upward velocity component
+	},
+
 	-- Attack data per combo hit
 	-- Duration = total attack time, HitTime = when hitbox activates
 	Attacks = {

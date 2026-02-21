@@ -20,6 +20,14 @@ return function()
 			attacker = Instance.new("Player")
 			attacker.Name = "Attacker"
 
+			-- Mock Attacker Character
+			local character = Instance.new("Model")
+			character.Name = "AttackerCharacter"
+			local charRoot = Instance.new("Part")
+			charRoot.Name = "HumanoidRootPart"
+			charRoot.Parent = character
+			attacker.Character = character
+
 			target = Instance.new("Model")
 			target.Name = "Target"
 
@@ -72,6 +80,37 @@ return function()
 			expect(didDamage).to.equal(true)
 			expect(targetDied).to.equal(false)
 			expect(humanoid.Health).to.equal(90) -- 100 - 10
+		end)
+
+		it("should apply knockback correctly", function()
+			local attackId = "attack_kb_1"
+			local attackIndex = 1
+			MockStatLib.Stats.Damage = nil
+
+			-- Setup positions for predictable knockback
+			-- Attacker at (0, 0, 0)
+			local attackerRoot = attacker.Character.HumanoidRootPart
+			attackerRoot.Position = Vector3.new(0, 0, 0)
+
+			-- Target at (0, 0, 5) -> Direction (0, 0, 1)
+			rootPart.Position = Vector3.new(0, 0, 5)
+
+			-- Expected Knockback:
+			-- Force = 5 (from config)
+			-- Multiplier = 2.5 (from config)
+			-- Upward = 3 (from config)
+			-- Speed = 5 * 2.5 = 12.5
+			-- Direction = (0, 0, 1)
+			-- Velocity = (0, 0, 1) * 12.5 + (0, 3, 0) = (0, 3, 12.5)
+
+			local didDamage = CombatService._processDamage(attacker, target, attackIndex, attackId)
+
+			expect(didDamage).to.equal(true)
+
+			local vel = rootPart.AssemblyLinearVelocity
+			expect(vel.X).to.equal(0)
+			expect(vel.Y).to.equal(3)
+			expect(vel.Z).to.equal(12.5)
 		end)
 
 		it("should apply stat modifiers to damage", function()
