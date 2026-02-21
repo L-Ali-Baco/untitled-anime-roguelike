@@ -56,7 +56,10 @@ function Networking.RegisterService(serviceName, serviceDef)
 					return method(serviceDef.Client, player, ...)
 				end
 			elseif type(method) == "table" and method.ClassName == "RemoteSignal" then
-				-- TODO: Handle Signals
+				local remoteEvent = Instance.new("RemoteEvent")
+				remoteEvent.Name = methodName
+				remoteEvent.Parent = serviceFolder
+				method:_SetRemote(remoteEvent)
 			end
 		end
 	end
