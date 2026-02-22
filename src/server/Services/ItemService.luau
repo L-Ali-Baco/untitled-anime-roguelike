@@ -174,10 +174,22 @@ function ItemService:SpawnW1Chest(position: Vector3)
 			end
 		end
 
+		if not chest.PrimaryPart then
+			local firstPart = chest:FindFirstChildWhichIsA("BasePart", true)
+			if firstPart then
+				chest.PrimaryPart = firstPart
+			end
+		end
+
+		local rotY = math.rad(90) -- Rotate 90 degrees clockwise on Y axis
+
 		if chest.PrimaryPart then
-			chest:PivotTo(CFrame.new(position))
+			chest:PivotTo(CFrame.new(position) * CFrame.Angles(0, rotY, 0))
 		else
 			chest:MoveTo(position)
+			-- Fallback rotation if MoveTo is used
+			local currentCFrame = chest:GetPivot()
+			chest:PivotTo(currentCFrame * CFrame.Angles(0, rotY, 0))
 		end
 		chest.Parent = workspace
 	elseif chestPrefab and chestPrefab:IsA("BasePart") then
