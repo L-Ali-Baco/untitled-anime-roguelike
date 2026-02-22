@@ -13,6 +13,34 @@ local task = require("@lune/task")
 -- MOCK ENVIRONMENT
 -- ============================================================================
 
+local Vector3 = {
+	new = function(x, y, z)
+		return { X = x, Y = y, Z = z, Magnitude = math.sqrt(x * x + y * y + z * z), Unit = { X = 0, Y = 0, Z = 0 } }
+	end,
+	zero = { X = 0, Y = 0, Z = 0 },
+}
+Vector3.new = function(x, y, z)
+	local v = { X = x, Y = y, Z = z }
+	v.Magnitude = math.sqrt(x * x + y * y + z * z)
+	v.Unit = v -- Simplification
+	setmetatable(v, {
+		__add = function(a, b)
+			return Vector3.new(a.X + b.X, a.Y + b.Y, a.Z + b.Z)
+		end,
+		__sub = function(a, b)
+			return Vector3.new(a.X - b.X, a.Y - b.Y, a.Z - b.Z)
+		end,
+		__mul = function(a, b)
+			if type(b) == "number" then
+				return Vector3.new(a.X * b, a.Y * b, a.Z * b)
+			end
+			return Vector3.new(a.X * b.X, a.Y * b.Y, a.Z * b.Z)
+		end,
+	})
+	return v
+end
+Vector3.zero = Vector3.new(0, 0, 0)
+
 local MockInstances = {}
 local MockModules = {}
 
@@ -20,7 +48,7 @@ local function createMockInstance(className, name)
 	local self = {
 		ClassName = className,
 		Name = name or className,
-		Parent = nil,
+		_parent = nil,
 		_children = {},
 		_attributes = {},
 		_tags = {},
@@ -32,7 +60,9 @@ local function createMockInstance(className, name)
 
 	function self:FindFirstChildOfClass(c)
 		for _, child in pairs(self._children) do
-			if child.ClassName == c then return child end
+			if child.ClassName == c then
+				return child
+			end
 		end
 		return nil
 	end
@@ -40,7 +70,10 @@ local function createMockInstance(className, name)
 	function self:WaitForChild(n)
 		-- Simple synchronous mock
 		if not self._children[n] then
+			print("WaitForChild: Creating missing child " .. n .. " in " .. self.Name)
 			self._children[n] = createMockInstance("Folder", n)
+		else
+			-- print("WaitForChild: Found " .. n .. " in " .. self.Name)
 		end
 		return self._children[n]
 	end
@@ -67,15 +100,41 @@ local function createMockInstance(className, name)
 		self.MaxHealth = 100
 		self.TakeDamage = function(s, amt)
 			s.Health = s.Health - amt
-			if s.Health < 0 then s.Health = 0 end
+			if s.Health < 0 then
+				s.Health = 0
+			end
 		end
 	end
 
 	-- Part specific
 	if className == "Part" or className == "MeshPart" then
-		self.Position = Vector3.new(0,0,0)
-		self.CFrame = { LookVector = Vector3.new(0,0,-1) }
+		self.Position = Vector3.new(0, 0, 0)
+		self.CFrame = { LookVector = Vector3.new(0, 0, -1) }
 	end
+
+	setmetatable(self, {
+		__index = function(t, k)
+			if k == "Parent" then
+				return t._parent
+			end
+			return t._children[k]
+		end,
+		__newindex = function(t, k, v)
+			if k == "Parent" then
+				if t._parent and t._parent._children then
+					-- Remove from old parent
+					t._parent._children[t.Name] = nil
+				end
+				t._parent = v
+				if v and v._children then
+					-- Add to new parent
+					v._children[t.Name] = t
+				end
+			else
+				rawset(t, k, v)
+			end
+		end,
+	})
 
 	return self
 end
@@ -89,20 +148,59 @@ end
 -- Global Mocks
 local game = createMockInstance("DataModel", "Game")
 
+game.GetService = function(self, serviceName)
+	if self._children[serviceName] then
+		return self._children[serviceName]
+	end
+	-- Auto-create if not found (simple mock)
+	local s = createMockInstance("Service", serviceName)
+	self._children[serviceName] = s
+	return s
+end
+
 local ReplicatedStorage = createMockInstance("ReplicatedStorage", "ReplicatedStorage")
 game._children["ReplicatedStorage"] = ReplicatedStorage
 ReplicatedStorage.Parent = game
 
-local CollectionService = {
-	HasTag = function(self, obj, tag)
-		return obj._tags and obj._tags[tag] == true
-	end,
-	AddTag = function(self, obj, tag)
-		obj._tags[tag] = true
+local CollectionService = createMockInstance("CollectionService", "CollectionService")
+CollectionService.HasTag = function(self, obj, tag)
+	return obj._tags and obj._tags[tag] == true
+end
+CollectionService.AddTag = function(self, obj, tag)
+	if not obj._tags then
+		obj._tags = {}
 	end
+	obj._tags[tag] = true
+end
+CollectionService.GetTagged = function(self, tag)
+	return {}
+end
+game._children["CollectionService"] = CollectionService
+
+local RunService = createMockInstance("RunService", "RunService")
+local heartbeatCallbacks = {}
+RunService.Heartbeat = {
+	Connect = function(self, callback)
+		table.insert(heartbeatCallbacks, callback)
+		return { Disconnect = function() end }
+	end,
 }
+RunService._step = function(dt)
+	for _, cb in ipairs(heartbeatCallbacks) do
+		cb(dt or 1 / 60)
+	end
+end
+game._children["RunService"] = RunService
 
 local Players = createMockInstance("Players", "Players")
+Players.PlayerRemoving = {
+	Connect = function()
+		return { Disconnect = function() end }
+	end,
+}
+Players.GetPlayers = function()
+	return {}
+end
 game._children["Players"] = Players
 
 -- Setup Folder Structure for require paths
@@ -127,6 +225,9 @@ Shared._children["Lib"] = LibFolder
 local StatLibModule = createMockInstance("ModuleScript", "StatLib")
 LibFolder._children["StatLib"] = StatLibModule
 
+local EnemyLibModule = createMockInstance("ModuleScript", "EnemyLib")
+LibFolder._children["EnemyLib"] = EnemyLibModule
+
 -- Helper to set mock module data
 local function registerMockModule(instance, data)
 	MockModules[instance] = data
@@ -139,22 +240,45 @@ local MockCombatConfig = {
 	Targeting = { TargetTag = "Enemy" },
 	Attacks = {
 		[1] = { Damage = 10, Knockback = 5, Hitstop = 0.1, ScreenShake = 0.1 },
-	}
+	},
 }
 registerMockModule(CombatConfigModule, MockCombatConfig)
 
 local MockStatLib = {
 	Stats = {}, -- Test overrides
 	GetStat = function(self, player, name, base)
-		if self.Stats[name] ~= nil then return self.Stats[name] end
+		if self.Stats[name] ~= nil then
+			return self.Stats[name]
+		end
 		return base
-	end
+	end,
 }
 registerMockModule(StatLibModule, MockStatLib)
 
 local MockRemotes = {
-	GetEvent = function() return { FireAllClients = function() end, OnServerEvent = { Connect = function() end } } end,
-	InitServer = function() end
+	_events = {},
+	GetEvent = function(self, name)
+		if not self._events[name] then
+			local event = {}
+			event._callback = nil
+			event.FireAllClients = function() end
+			event.FireClient = function() end
+			event.OnServerEvent = {
+				Connect = function(_, callback)
+					event._callback = callback
+					return { Disconnect = function() end }
+				end,
+			}
+			event.FireServer = function(self, ...) -- helper
+				if self._callback then
+					self._callback(...)
+				end
+			end
+			self._events[name] = event
+		end
+		return self._events[name]
+	end,
+	InitServer = function() end,
 }
 registerMockModule(RemotesFolder, MockRemotes) -- Remotes is required as a folder in source code? "require(Shared:WaitForChild('Remotes'))" -> It might be a ModuleScript named Remotes.
 -- The source says: `local Remotes = require(Shared:WaitForChild("Remotes"))`.
@@ -178,42 +302,78 @@ registerMockModule(ProcServiceModule, MockProcService)
 -- Mock ClassService
 local ClassServiceModule = createMockInstance("ModuleScript", "ClassService")
 local MockClassService = {
-	GetPlayerClass = function() return "Warrior" end
+	GetPlayerClass = function()
+		return "Warrior"
+	end,
 }
 registerMockModule(ClassServiceModule, MockClassService)
 
+-- Mock ItemService
+local ItemServiceModule = createMockInstance("ModuleScript", "ItemService")
+local MockItemService = {
+	GetPlayerInventory = function()
+		return {}
+	end,
+}
+registerMockModule(ItemServiceModule, MockItemService)
+
+-- Mock EnemyLib
+local MockEnemyLib = {
+	IsAlive = function(self, target)
+		if not target then
+			return false
+		end
+		local hum = target:FindFirstChild("Humanoid")
+		if hum then
+			return hum.Health > 0
+		end
+		return true
+	end,
+	GetHealth = function(self, target)
+		local hum = target:FindFirstChild("Humanoid")
+		return hum and hum.Health or 100
+	end,
+	TakeDamage = function(self, target, amount)
+		local hum = target:FindFirstChild("Humanoid")
+		if hum then
+			hum:TakeDamage(amount)
+		end
+	end,
+}
+registerMockModule(EnemyLibModule, MockEnemyLib)
 
 -- GLOBALS
 local _G = {
 	game = game,
 	Instance = { new = Instance_new },
-	Vector3 = { new = function(x,y,z) return {X=x,Y=y,Z=z, Magnitude=math.sqrt(x*x+y*y+z*z), Unit={X=0,Y=0,Z=0}} end, zero = {X=0,Y=0,Z=0} },
-	task = { delay = function(t, f) f() end, wait = function() end },
+	Vector3 = Vector3,
+	task = {
+		delay = function(t, f)
+			f()
+		end,
+		wait = function() end,
+	},
 	tick = os.clock,
 	math = math,
 	print = function(...) end, -- silence prints
-	warn = function(...) print("WARN:", ...) end,
+	warn = function(...)
+		print("WARN:", ...)
+	end,
 	typeof = typeof,
 	type = type,
 }
-_G.Vector3.new = function(x,y,z)
-	local v = {X=x,Y=y,Z=z}
-	v.Magnitude = math.sqrt(x*x+y*y+z*z)
-	v.Unit = v -- Simplification
-	setmetatable(v, {
-		__add = function(a,b) return _G.Vector3.new(a.X+b.X, a.Y+b.Y, a.Z+b.Z) end,
-		__sub = function(a,b) return _G.Vector3.new(a.X-b.X, a.Y-b.Y, a.Z-b.Z) end,
-		__mul = function(a,b)
-			if type(b) == "number" then return _G.Vector3.new(a.X*b, a.Y*b, a.Z*b) end
-			return _G.Vector3.new(a.X*b.X, a.Y*b.Y, a.Z*b.Z)
-		end
-	})
-	return v
-end
-_G.Vector3.zero = _G.Vector3.new(0,0,0)
+_G._G = _G
 
 -- Global require interceptor
 local function mockRequire(module)
+	-- print("Requiring: " .. tostring(module))
+	if type(module) == "string" then
+		error("require called with string: " .. module)
+	end
+	if not module then
+		error("require called with nil")
+	end
+
 	if MockModules[module] then
 		return MockModules[module]
 	end
@@ -253,8 +413,8 @@ local function expect(value)
 				if value ~= expected then
 					error("Expected " .. tostring(expected) .. " but got " .. tostring(value))
 				end
-			end
-		}
+			end,
+		},
 	}
 end
 
@@ -272,7 +432,9 @@ end
 local originalIt = it
 it = function(name, callback)
 	originalIt(name, function()
-		if _G._beforeEachCallback then _G._beforeEachCallback() end
+		if _G._beforeEachCallback then
+			_G._beforeEachCallback()
+		end
 		callback()
 	end)
 end
@@ -288,7 +450,9 @@ local function loadScript(path, env)
 
 	-- We need to construct the environment
 	local newEnv = setmetatable({}, { __index = _G })
-	for k,v in pairs(env or {}) do newEnv[k] = v end
+	for k, v in pairs(env or {}) do
+		newEnv[k] = v
+	end
 
 	newEnv.require = mockRequire
 	newEnv.game = game
@@ -300,6 +464,7 @@ local function loadScript(path, env)
 		-- Add ProcService to Services so `script.Parent.ProcService` works
 		newEnv.script.Parent._children["ProcService"] = ProcServiceModule
 		newEnv.script.Parent._children["ClassService"] = ClassServiceModule
+		newEnv.script.Parent._children["ItemService"] = ItemServiceModule
 	end
 
 	if path:find("CombatService.spec.luau") then
@@ -315,7 +480,9 @@ local function loadScript(path, env)
 
 	-- Luau loadstring
 	local chunk, err = (loadstring or load)(content, path)
-	if not chunk then error(err) end
+	if not chunk then
+		error(err)
+	end
 	setfenv(chunk, newEnv)
 	return chunk
 end
