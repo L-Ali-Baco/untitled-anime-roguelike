@@ -94,8 +94,11 @@ end
     Handle keyboard input began
 ]]
 local function onInputBegan(input: InputObject, gameProcessed: boolean)
-	-- Mouse attack (M1)
+	-- Mouse attack (M1) - check isInputBlocked but NOT gameProcessed (attacks work even near UI)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if isInputBlocked then
+			return
+		end
 		isAttackHeld = true
 		attackJustPressed = true
 		InputController.OnAttackPressed:Fire()
@@ -104,6 +107,9 @@ local function onInputBegan(input: InputObject, gameProcessed: boolean)
 
 	-- Mouse secondary (M2)
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		if isInputBlocked then
+			return
+		end
 		InputController.OnSecondaryPressed:Fire()
 		return
 	end

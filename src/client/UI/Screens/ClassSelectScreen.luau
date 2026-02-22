@@ -268,6 +268,9 @@ function ClassSelectScreen.new(
 	-- State
 	local isVisible = scope:Value(false)
 
+	-- Forward ref for screenGui so setVisible can toggle Enabled imperatively
+	local screenGui = nil
+
 	-- Hover states for each class
 	local hoverStates: { [string]: Fusion.Value<boolean> } = {}
 	for _, className in ClassConfig.ClassOrder do
@@ -277,6 +280,12 @@ function ClassSelectScreen.new(
 	-- Internal function to handle visibility changes
 	local function setVisible(visible: boolean)
 		isVisible:set(visible)
+
+		-- Imperative Enabled toggle — removes ClassSelectGui from the hit-test stack
+		-- when hidden, so it can never intercept clicks on other ScreenGuis.
+		if screenGui then
+			screenGui.Enabled = visible
+		end
 
 		if InputController then
 			if visible then
@@ -328,14 +337,15 @@ function ClassSelectScreen.new(
 	local LocalPlayer = Players.LocalPlayer
 	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-	local screenGui = scope:New("ScreenGui")({
+	-- Assign to the forward ref declared above setVisible
+	screenGui = scope:New("ScreenGui")({
 		Name = "ClassSelectGui",
 		Parent = playerGui,
 		ResetOnSpawn = false,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 		IgnoreGuiInset = true,
-		DisplayOrder = 100, -- Above other UI
-		Enabled = true,
+		DisplayOrder = 200, -- Above all other UI while visible
+		Enabled = false, -- Controlled imperatively via setVisible; show() enables it
 
 		[Children] = {
 			-- Darkened background

@@ -160,9 +160,12 @@ end
 --[[
     Spawn a W1_Chest at a position
 ]]
-function ItemService:SpawnW1Chest(position: Vector3)
+function ItemService:SpawnW1Chest(spawnCFrameOrVector: any)
 	local chestPrefab = ReplicatedStorage:FindFirstChild("W1_Chest", true)
 	local chest
+
+	local position = typeof(spawnCFrameOrVector) == "CFrame" and spawnCFrameOrVector.Position or spawnCFrameOrVector
+	local targetCFrame = typeof(spawnCFrameOrVector) == "CFrame" and spawnCFrameOrVector or CFrame.new(position)
 
 	if chestPrefab and chestPrefab:IsA("Model") then
 		chest = chestPrefab:Clone()
@@ -174,28 +177,60 @@ function ItemService:SpawnW1Chest(position: Vector3)
 			end
 		end
 
-		if not chest.PrimaryPart then
-			local firstPart = chest:FindFirstChildWhichIsA("BasePart", true)
-			if firstPart then
-				chest.PrimaryPart = firstPart
+		-- Add Highlight for visibility and texture brightening
+		local highlight = Instance.new("Highlight")
+		highlight.FillColor = Color3.fromRGB(255, 200, 100) -- Soft gold fill
+		highlight.FillTransparency = 0.85 -- Much subtler fill to avoid washing out
+		highlight.OutlineColor = Color3.fromRGB(255, 180, 50) -- Subtle gold outline
+		highlight.OutlineTransparency = 0.2 -- Softer outline
+		highlight.DepthMode = Enum.HighlightDepthMode.Occluded
+		highlight.Enabled = false -- Start disabled
+		highlight.Parent = chest
+
+		-- Add a PointLight to cast a real glow onto the surrounding environment
+		local pointLight = Instance.new("PointLight")
+		pointLight.Color = Color3.fromRGB(255, 180, 50)
+		pointLight.Range = 12
+		pointLight.Brightness = 2
+		pointLight.Shadows = true
+		pointLight.Enabled = false
+		local lightPart = chest:FindFirstChildWhichIsA("BasePart", true)
+		if lightPart then
+			pointLight.Parent = lightPart
+		end
+
+		-- Manage highlight and light distance dynamically
+		local RunService = game:GetService("RunService")
+		local conn
+		conn = RunService.Heartbeat:Connect(function()
+			if not chest or not chest.Parent then
+				if conn then
+					conn:Disconnect()
+				end
+				return
 			end
-		end
 
-		local rotY = math.rad(90) -- Rotate 90 degrees clockwise on Y axis
+			local nearest = math.huge
+			for _, p in Players:GetPlayers() do
+				if p.Character and p.Character.PrimaryPart then
+					local dist = (chest:GetPivot().Position - p.Character.PrimaryPart.Position).Magnitude
+					if dist < nearest then
+						nearest = dist
+					end
+				end
+			end
+			-- Re-increased range so players can spot it from across the room
+			local isNear = (nearest <= 60)
+			highlight.Enabled = isNear
+			pointLight.Enabled = isNear
+		end)
 
-		if chest.PrimaryPart then
-			chest:PivotTo(CFrame.new(position) * CFrame.Angles(0, rotY, 0))
-		else
-			chest:MoveTo(position)
-			-- Fallback rotation if MoveTo is used
-			local currentCFrame = chest:GetPivot()
-			chest:PivotTo(currentCFrame * CFrame.Angles(0, rotY, 0))
-		end
+		chest:PivotTo(targetCFrame)
 		chest.Parent = workspace
 	elseif chestPrefab and chestPrefab:IsA("BasePart") then
 		chest = chestPrefab:Clone()
 		chest.Anchored = true
-		chest.Position = position + Vector3.new(0, chest.Size.Y / 2, 0)
+		chest.CFrame = CFrame.new(targetCFrame.Position + Vector3.new(0, chest.Size.Y / 2, 0)) * targetCFrame.Rotation
 		chest.Parent = workspace
 	else
 		-- Fallback to basic part if model not found
@@ -222,6 +257,7 @@ function ItemService:SpawnW1Chest(position: Vector3)
 	prompt.HoldDuration = 0.5
 	prompt.MaxActivationDistance = 15
 	prompt.RequiresLineOfSight = false
+	prompt.Style = Enum.ProximityPromptStyle.Custom
 
 	activeChests[chest] = true
 	CollectionService:AddTag(chest, "W1_Chest")
@@ -234,6 +270,8 @@ function ItemService:SpawnW1Chest(position: Vector3)
 	if spawnRemote then
 		spawnRemote:FireAllClients(position)
 	end
+
+	return chest
 end
 
 --[[
@@ -272,7 +310,7 @@ function ItemService:OpenW1Chest(chest: Instance, player: Player)
 
 		local promptRemote = Remotes:GetEvent("PromptItemSelection")
 		if promptRemote then
-			promptRemote:FireClient(player, chest, items[1], items[2], items[3])
+			promptRemote:FireClient(player, nil, items[1], items[2], items[3])
 		end
 	else
 		-- Feedback for not enough scrap
@@ -309,7 +347,11 @@ local function setupDebugCommands()
 			elseif cmd == "/chest" then
 				if player.Character and player.Character.PrimaryPart then
 					local root = player.Character.PrimaryPart
-					local lookInFront = root.Position + (root.CFrame.LookVector * 10)
+					local head = player.Character:FindFirstChild("Head") or root
+
+					-- Use flattened head lookvector to spawn explicitly where the player's camera faces
+					local forward = Vector3.new(head.CFrame.LookVector.X, 0, head.CFrame.LookVector.Z).Unit
+					local lookInFront = root.Position + (forward * 8)
 
 					-- Raycast down to find the floor
 					local raycastParams = RaycastParams.new()
@@ -320,13 +362,27 @@ local function setupDebugCommands()
 						workspace:Raycast(lookInFront + Vector3.new(0, 10, 0), Vector3.new(0, -50, 0), raycastParams)
 					local spawnPos
 					if result then
-						spawnPos = result.Position + Vector3.new(0, 3, 0) -- Slightly above ground
+						spawnPos = result.Position
 					else
 						spawnPos = lookInFront + Vector3.new(0, 5, 0)
 					end
 
-					ItemService:SpawnW1Chest(spawnPos)
-					print("Spawned W1_Chest at", spawnPos)
+					-- Create the chest oriented to look at the player
+					local lookAtPos = root.Position
+					local spawnCFrame = CFrame.lookAt(spawnPos, Vector3.new(lookAtPos.X, spawnPos.Y, lookAtPos.Z))
+
+					-- Spawn the chest using the calculated CFrame
+					local spawnedChest = ItemService:SpawnW1Chest(spawnCFrame)
+
+					-- Precision placement using BoundingBox so it perfectly touches the floor without floating
+					if spawnedChest and spawnedChest:IsA("Model") then
+						local bboxCFrame, bboxSize = spawnedChest:GetBoundingBox()
+						local lowestY = bboxCFrame.Position.Y - (bboxSize.Y / 2)
+						local offsetY = spawnPos.Y - lowestY - 0.5 -- Push 0.5 studs deeper to combat invisible mesh padding
+						spawnedChest:PivotTo(spawnedChest:GetPivot() + Vector3.new(0, offsetY, 0))
+					end
+
+					print("Spawned W1_Chest perfectly clamped to floor at", spawnPos)
 				end
 			elseif cmd == "/scrap" then
 				local amount = tonumber(args[2]) or 25
@@ -349,7 +405,7 @@ function ItemService:Start()
 	-- Handle item selection from W1_Chest
 	local selectRemote = Remotes:GetEvent("SelectChestItem")
 	if selectRemote then
-		selectRemote.OnServerEvent:Connect(function(player, chestInstance, chosenItemKey)
+		selectRemote.OnServerEvent:Connect(function(player, chosenItemKey)
 			if chosenItemKey then
 				self:GrantItem(player, chosenItemKey)
 			end
