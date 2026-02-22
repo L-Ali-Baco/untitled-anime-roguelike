@@ -208,4 +208,82 @@ return function()
 			-- In our mock, TakeDamage subtracts.
 		end)
 	end)
+
+	describe("Queue Optimization", function()
+		it("should cleanup expired attacks from queue", function()
+			-- Need to access Remotes and RunService
+			-- Remotes are mocked via 'require', but we can access them via global/mock mechanism if available.
+			-- Or we can assume CombatService:Start() has connected them.
+
+			-- We need to call CombatService:Start() to connect events and start heartbeat.
+			-- But verification script loaded the chunk and returned the table. It didn't call Start().
+			-- Wait, verification script DOES NOT call Start().
+			-- CombatService:Start() connects Heartbeat.
+
+			-- So we must call Start() in this test suite.
+			CombatService:Start()
+
+			-- Get the mocked RequestAttack event
+			-- We need access to the same Remotes instance the service used.
+			-- In our mock environment, `require(Shared.Remotes)` returns the MockRemotes object.
+			-- We can try to require it again here?
+			-- The test environment mocks `require`.
+
+			local Remotes = require(ReplicatedStorage.Shared.Remotes)
+			local RunService = game:GetService("RunService")
+
+			local player = Instance.new("Player")
+			player.Name = "QueueTester"
+			player.Character = Instance.new("Model")
+			local root = Instance.new("Part")
+			root.Name = "HumanoidRootPart"
+			root.Parent = player.Character
+			local hum = Instance.new("Humanoid")
+			hum.Parent = player.Character
+
+			-- Fire an attack
+			local attackId = "queue_test_1"
+			Remotes:GetEvent("RequestAttack"):FireServer(player, 1, nil, attackId)
+
+			-- Verify it's in the queue
+			-- We need access to _activeAttacks
+			local queue = CombatService._activeAttacks
+			expect(#queue).to.equal(1)
+			expect(queue[1].id).to.equal(attackId)
+
+			-- Advance time by 0.5s (should NOT expire yet, expiry is +1s)
+			-- We need to mock 'tick()' globally?
+			-- The mock environment uses `os.clock`.
+			-- We can't easily advance os.clock unless we mocked it with a controllable variable.
+			-- In verification script: `tick = os.clock`.
+
+			-- We can overwrite `tick` in _G?
+			-- The test runs in the same environment.
+
+			local oldTick = _G.tick
+			local time = oldTick()
+			_G.tick = function()
+				return time
+			end
+
+			-- Run Heartbeat
+			RunService._step(0.1)
+
+			-- Should still be there
+			expect(#queue).to.equal(1)
+			expect(queue[1]).to.equal(queue[1]) -- checking it wasn't nilled
+
+			-- Advance time > 1s
+			time = time + 1.1
+
+			-- Run Heartbeat
+			RunService._step(0.1)
+
+			-- Should be cleared (nil)
+			expect(queue[1]).to.equal(nil)
+
+			-- Restore tick
+			_G.tick = oldTick
+		end)
+	end)
 end
