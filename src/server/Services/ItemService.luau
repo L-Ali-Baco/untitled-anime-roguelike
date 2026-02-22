@@ -161,23 +161,46 @@ end
     Spawn a W1_Chest at a position
 ]]
 function ItemService:SpawnW1Chest(position: Vector3)
-	local chest = Instance.new("Part")
-	chest.Name = "W1_Chest"
-	chest.Size = Vector3.new(4, 3, 3)
-	chest.Position = position + Vector3.new(0, 1.5, 0)
-	chest.Color = Color3.fromRGB(180, 150, 50) -- Goldish color to distinguish
-	chest.Material = Enum.Material.Metal
-	chest.Anchored = true
-	chest.CanCollide = true
-	chest.Parent = workspace
+	local chestPrefab = ReplicatedStorage:FindFirstChild("W1_Chest", true)
+	local chest
 
-	local prompt = Instance.new("ProximityPrompt")
+	if chestPrefab and chestPrefab:IsA("Model") then
+		chest = chestPrefab:Clone()
+		if chest.PrimaryPart then
+			chest:PivotTo(CFrame.new(position))
+		else
+			chest:MoveTo(position)
+		end
+		chest.Parent = workspace
+	elseif chestPrefab and chestPrefab:IsA("BasePart") then
+		chest = chestPrefab:Clone()
+		chest.Position = position + Vector3.new(0, chest.Size.Y / 2, 0)
+		chest.Parent = workspace
+	else
+		-- Fallback to basic part if model not found
+		chest = Instance.new("Part")
+		chest.Name = "W1_Chest"
+		chest.Size = Vector3.new(4, 3, 3)
+		chest.Position = position + Vector3.new(0, 1.5, 0)
+		chest.Color = Color3.fromRGB(180, 150, 50) -- Goldish color to distinguish
+		chest.Material = Enum.Material.Metal
+		chest.Anchored = true
+		chest.CanCollide = true
+		chest.Parent = workspace
+	end
+
+	-- Add or update ProximityPrompt
+	local prompt = chest:FindFirstChildWhichIsA("ProximityPrompt", true)
+	if not prompt then
+		prompt = Instance.new("ProximityPrompt")
+		prompt.Parent = chest:IsA("Model") and (chest.PrimaryPart or chest:FindFirstChildWhichIsA("BasePart")) or chest
+	end
+
 	prompt.ActionText = "Open W1_Chest (25 Scrap)"
 	prompt.ObjectText = "Special Loot"
 	prompt.HoldDuration = 0.5
 	prompt.MaxActivationDistance = 15
 	prompt.RequiresLineOfSight = false
-	prompt.Parent = chest
 
 	activeChests[chest] = true
 	CollectionService:AddTag(chest, "W1_Chest")
