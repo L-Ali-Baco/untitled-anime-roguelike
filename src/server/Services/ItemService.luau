@@ -297,10 +297,29 @@ local function setupDebugCommands()
 			elseif cmd == "/chest" then
 				if player.Character and player.Character.PrimaryPart then
 					local root = player.Character.PrimaryPart
-					local spawnPos = root.Position + (root.CFrame.LookVector * 10) + Vector3.new(0, 5, 0)
+					local lookInFront = root.Position + (root.CFrame.LookVector * 10)
+
+					-- Raycast down to find the floor
+					local raycastParams = RaycastParams.new()
+					raycastParams.FilterDescendantsInstances = { player.Character }
+					raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+					local result =
+						workspace:Raycast(lookInFront + Vector3.new(0, 10, 0), Vector3.new(0, -50, 0), raycastParams)
+					local spawnPos
+					if result then
+						spawnPos = result.Position + Vector3.new(0, 3, 0) -- Slightly above ground
+					else
+						spawnPos = lookInFront + Vector3.new(0, 5, 0)
+					end
+
 					ItemService:SpawnW1Chest(spawnPos)
-					print("Spawned W1_Chest")
+					print("Spawned W1_Chest at", spawnPos)
 				end
+			elseif cmd == "/scrap" then
+				local amount = tonumber(args[2]) or 25
+				ItemService:AddScrap(player, amount)
+				print("Gave", amount, "Scrap to", player.Name)
 			end
 		end)
 	end)
