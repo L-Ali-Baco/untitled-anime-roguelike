@@ -166,6 +166,14 @@ function ItemService:SpawnW1Chest(position: Vector3)
 
 	if chestPrefab and chestPrefab:IsA("Model") then
 		chest = chestPrefab:Clone()
+
+		-- Anchor all parts to prevent it from being pushed
+		for _, desc in pairs(chest:GetDescendants()) do
+			if desc:IsA("BasePart") then
+				desc.Anchored = true
+			end
+		end
+
 		if chest.PrimaryPart then
 			chest:PivotTo(CFrame.new(position))
 		else
@@ -174,6 +182,7 @@ function ItemService:SpawnW1Chest(position: Vector3)
 		chest.Parent = workspace
 	elseif chestPrefab and chestPrefab:IsA("BasePart") then
 		chest = chestPrefab:Clone()
+		chest.Anchored = true
 		chest.Position = position + Vector3.new(0, chest.Size.Y / 2, 0)
 		chest.Parent = workspace
 	else
