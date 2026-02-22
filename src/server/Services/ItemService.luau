@@ -285,6 +285,13 @@ local function setupDebugCommands()
 					end
 				end
 				print("Item not found")
+			elseif cmd == "/chest" then
+				if player.Character and player.Character.PrimaryPart then
+					local spawnPos = player.Character.PrimaryPart.Position
+						+ (player.Character.PrimaryPart.CFrame.LookVector * 10)
+					ItemService:SpawnW1Chest(spawnPos)
+					print("Spawned W1_Chest")
+				end
 			end
 		end)
 	end)
