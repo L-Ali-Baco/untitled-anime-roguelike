@@ -129,7 +129,7 @@ function UIController:InitializeUI()
 
 	-- Create W1_Chest Item Selection Screen
 	local ItemSelectionScreen = require(UI.Screens.ItemSelectionScreen)
-	local cleanupItemSelection = ItemSelectionScreen.new()
+	local cleanupItemSelection = ItemSelectionScreen.new(InputController)
 	table.insert(uiCleanupFunctions, cleanupItemSelection)
 
 	-- Create Skill Bar (Cooldowns)
