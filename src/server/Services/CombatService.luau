@@ -340,8 +340,11 @@ function CombatService.ApplyDamage(
 		)
 	end
 
-	if targetDied and ProcService then
-		ProcService:ProcessKill(attacker, target)
+	if targetDied then
+		if ProcService then
+			ProcService:ProcessKill(attacker, target)
+		end
+		ItemService:AddScrap(attacker, 5) -- Grant 5 Scrap per kill
 	end
 
 	return true, targetDied

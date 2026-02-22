@@ -51,6 +51,8 @@ local REMOTE_EVENTS = {
 	"GrantItem", -- Server -> Client: Notifies player of item gained
 	"RequestOpenChest", -- Client -> Server: Request to open a loot chest
 	"ChestSpawned", -- Server -> All Clients: Visual for chest appearing
+	"PromptItemSelection", -- Server -> Client: Show W1_Chest options
+	"SelectChestItem", -- Client -> Server: Select W1_Chest option
 
 	-- Class System
 	"SelectClass", -- Client -> Server: Player selected a class

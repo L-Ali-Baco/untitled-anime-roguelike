@@ -31,6 +31,11 @@ local connections = {}
     Store original lighting values
 ]]
 local function storeOriginalLighting()
+	-- Boost baseline lighting for better visibility
+	Lighting.Brightness = math.max(Lighting.Brightness, 3)
+	Lighting.Ambient = Color3.fromRGB(120, 120, 120)
+	Lighting.OutdoorAmbient = Color3.fromRGB(120, 120, 120)
+
 	originalLighting = {
 		ClockTime = Lighting.ClockTime,
 		Brightness = Lighting.Brightness,

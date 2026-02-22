@@ -345,10 +345,15 @@ end
 local function runStandaloneScript(path, filename)
 	print(stdio.color("cyan") .. "Running Script (Subprocess): " .. path .. stdio.color("reset"))
 	-- Run with lune in the tests directory to resolve relative paths
-	local result = process.spawn("lune", { "run", filename }, {
+	local result = process.exec("lune", { "run", filename }, {
 		cwd = "tests",
-		stdio = "inherit",
 	})
+	if result.stdout and result.stdout ~= "" then
+		print(result.stdout)
+	end
+	if result.stderr and result.stderr ~= "" then
+		print(stdio.color("red") .. result.stderr .. stdio.color("reset"))
+	end
 
 	if result.ok then
 		print(stdio.color("green") .. "  ✓ Script passed" .. stdio.color("reset"))

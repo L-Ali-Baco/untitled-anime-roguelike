@@ -19,6 +19,9 @@ local ItemService = {
 -- Player inventories: { [Player]: { [string]: number } }
 local inventories = {}
 
+-- Player scrap balances: { [Player]: number }
+local scrapBalances = {}
+
 -- Active Chests: { [Instance]: boolean }
 local activeChests = {}
 
@@ -34,6 +37,28 @@ end
 ]]
 function ItemService:GetPlayerInventory(player: Player): { [string]: number }
 	return inventories[player] or {}
+end
+
+--[[
+    Economy Functions
+]]
+function ItemService:GetScrap(player: Player): number
+	return scrapBalances[player] or 0
+end
+
+function ItemService:AddScrap(player: Player, amount: number)
+	scrapBalances[player] = self:GetScrap(player) + amount
+	player:SetAttribute("Scrap", scrapBalances[player])
+end
+
+function ItemService:SpendScrap(player: Player, amount: number): boolean
+	local current = self:GetScrap(player)
+	if current >= amount then
+		scrapBalances[player] = current - amount
+		player:SetAttribute("Scrap", scrapBalances[player])
+		return true
+	end
+	return false
 end
 
 --[[
@@ -132,6 +157,88 @@ function ItemService:OpenChest(chest: Instance, player: Player)
 	chest:Destroy()
 end
 
+--[[
+    Spawn a W1_Chest at a position
+]]
+function ItemService:SpawnW1Chest(position: Vector3)
+	local chest = Instance.new("Part")
+	chest.Name = "W1_Chest"
+	chest.Size = Vector3.new(4, 3, 3)
+	chest.Position = position + Vector3.new(0, 1.5, 0)
+	chest.Color = Color3.fromRGB(180, 150, 50) -- Goldish color to distinguish
+	chest.Material = Enum.Material.Metal
+	chest.Anchored = true
+	chest.CanCollide = true
+	chest.Parent = workspace
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Open W1_Chest (25 Scrap)"
+	prompt.ObjectText = "Special Loot"
+	prompt.HoldDuration = 0.5
+	prompt.MaxActivationDistance = 15
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = chest
+
+	activeChests[chest] = true
+	CollectionService:AddTag(chest, "W1_Chest")
+
+	prompt.Triggered:Connect(function(player)
+		self:OpenW1Chest(chest, player)
+	end)
+
+	local spawnRemote = Remotes:GetEvent("ChestSpawned")
+	if spawnRemote then
+		spawnRemote:FireAllClients(position)
+	end
+end
+
+--[[
+    Handle opening a W1_Chest
+]]
+function ItemService:OpenW1Chest(chest: Instance, player: Player)
+	if not activeChests[chest] then
+		return
+	end
+
+	-- Attempt to purchase
+	if self:SpendScrap(player, 25) then
+		activeChests[chest] = nil
+
+		-- Get 3 distinct random items
+		local items = {}
+		while #items < 3 do
+			local key = getRandomItemKey()
+			if not table.find(items, key) then
+				table.insert(items, key)
+			end
+		end
+
+		-- Disable prompt immediately
+		local prompt = chest:FindFirstChildOfClass("ProximityPrompt")
+		if prompt then
+			prompt.Enabled = false
+		end
+
+		-- Wait briefly to avoid popping out instantly
+		task.delay(0.5, function()
+			if chest then
+				chest:Destroy()
+			end
+		end)
+
+		local promptRemote = Remotes:GetEvent("PromptItemSelection")
+		if promptRemote then
+			promptRemote:FireClient(player, chest, items[1], items[2], items[3])
+		end
+	else
+		-- Feedback for not enough scrap
+		local debugRemote = Remotes:GetEvent("DebugMessage")
+		if debugRemote then
+			debugRemote:FireClient(player, "Not enough Scrap! Need 25.", Color3.new(1, 0, 0))
+		end
+	end
+end
+
 function ItemService:Init()
 	print("[ItemService] Initializing...")
 end
@@ -164,9 +271,20 @@ function ItemService:Start()
 	-- Cleanup on leave
 	Players.PlayerRemoving:Connect(function(player)
 		inventories[player] = nil
+		scrapBalances[player] = nil
 	end)
 
 	setupDebugCommands()
+
+	-- Handle item selection from W1_Chest
+	local selectRemote = Remotes:GetEvent("SelectChestItem")
+	if selectRemote then
+		selectRemote.OnServerEvent:Connect(function(player, chestInstance, chosenItemKey)
+			if chosenItemKey then
+				self:GrantItem(player, chosenItemKey)
+			end
+		end)
+	end
 
 	print("[ItemService] Started")
 end

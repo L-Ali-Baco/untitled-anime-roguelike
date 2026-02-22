@@ -122,6 +122,16 @@ function UIController:InitializeUI()
 	local cleanupHealthBar = PlayerHealthBar.new()
 	table.insert(uiCleanupFunctions, cleanupHealthBar)
 
+	-- Create Scrap Display HUD
+	local ScrapDisplay = require(UI.HUD.ScrapDisplay)
+	local cleanupScrapDisplay = ScrapDisplay.new()
+	table.insert(uiCleanupFunctions, cleanupScrapDisplay)
+
+	-- Create W1_Chest Item Selection Screen
+	local ItemSelectionScreen = require(UI.Screens.ItemSelectionScreen)
+	local cleanupItemSelection = ItemSelectionScreen.new()
+	table.insert(uiCleanupFunctions, cleanupItemSelection)
+
 	-- Create Skill Bar (Cooldowns)
 	local success, err = pcall(function()
 		local SkillBar = require(UI.HUD.SkillBar)

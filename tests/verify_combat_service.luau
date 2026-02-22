@@ -8,6 +8,7 @@
 
 local fs = require("@lune/fs")
 local task = require("@lune/task")
+local MockVector3_new
 
 -- ============================================================================
 -- MOCK ENVIRONMENT
@@ -20,7 +21,6 @@ local function createMockInstance(className, name)
 	local self = {
 		ClassName = className,
 		Name = name or className,
-		Parent = nil,
 		_children = {},
 		_attributes = {},
 		_tags = {},
@@ -32,7 +32,9 @@ local function createMockInstance(className, name)
 
 	function self:FindFirstChildOfClass(c)
 		for _, child in pairs(self._children) do
-			if child.ClassName == c then return child end
+			if child.ClassName == c then
+				return child
+			end
 		end
 		return nil
 	end
@@ -43,6 +45,10 @@ local function createMockInstance(className, name)
 			self._children[n] = createMockInstance("Folder", n)
 		end
 		return self._children[n]
+	end
+
+	function self:GetService(n)
+		return self:WaitForChild(n)
 	end
 
 	function self:GetAttribute(n)
@@ -67,15 +73,29 @@ local function createMockInstance(className, name)
 		self.MaxHealth = 100
 		self.TakeDamage = function(s, amt)
 			s.Health = s.Health - amt
-			if s.Health < 0 then s.Health = 0 end
+			if s.Health < 0 then
+				s.Health = 0
+			end
 		end
 	end
 
 	-- Part specific
 	if className == "Part" or className == "MeshPart" then
-		self.Position = Vector3.new(0,0,0)
-		self.CFrame = { LookVector = Vector3.new(0,0,-1) }
+		self.Position = MockVector3_new(0, 0, 0)
+		self.CFrame = { LookVector = MockVector3_new(0, 0, -1) }
 	end
+
+	setmetatable(self, {
+		__index = function(t, k)
+			return rawget(t, "_children")[k]
+		end,
+		__newindex = function(t, k, v)
+			rawset(t, k, v)
+			if k == "Parent" and type(v) == "table" and v._children then
+				v._children[t.Name] = t
+			end
+		end,
+	})
 
 	return self
 end
@@ -99,7 +119,7 @@ local CollectionService = {
 	end,
 	AddTag = function(self, obj, tag)
 		obj._tags[tag] = true
-	end
+	end,
 }
 
 local Players = createMockInstance("Players", "Players")
@@ -127,6 +147,9 @@ Shared._children["Lib"] = LibFolder
 local StatLibModule = createMockInstance("ModuleScript", "StatLib")
 LibFolder._children["StatLib"] = StatLibModule
 
+local EnemyLibModule = createMockInstance("ModuleScript", "EnemyLib")
+LibFolder._children["EnemyLib"] = EnemyLibModule
+
 -- Helper to set mock module data
 local function registerMockModule(instance, data)
 	MockModules[instance] = data
@@ -139,22 +162,44 @@ local MockCombatConfig = {
 	Targeting = { TargetTag = "Enemy" },
 	Attacks = {
 		[1] = { Damage = 10, Knockback = 5, Hitstop = 0.1, ScreenShake = 0.1 },
-	}
+	},
 }
 registerMockModule(CombatConfigModule, MockCombatConfig)
 
 local MockStatLib = {
 	Stats = {}, -- Test overrides
 	GetStat = function(self, player, name, base)
-		if self.Stats[name] ~= nil then return self.Stats[name] end
+		if self.Stats[name] ~= nil then
+			return self.Stats[name]
+		end
 		return base
-	end
+	end,
 }
 registerMockModule(StatLibModule, MockStatLib)
 
+local MockEnemyLib = {
+	IsAlive = function(self, target)
+		local hum = target:FindFirstChild("Humanoid")
+		return hum and hum.Health > 0 or false
+	end,
+	GetHealth = function(self, target)
+		local hum = target:FindFirstChild("Humanoid")
+		return hum and hum.Health or 0
+	end,
+	TakeDamage = function(self, target, amt)
+		local hum = target:FindFirstChild("Humanoid")
+		if hum then
+			hum:TakeDamage(amt)
+		end
+	end,
+}
+registerMockModule(EnemyLibModule, MockEnemyLib)
+
 local MockRemotes = {
-	GetEvent = function() return { FireAllClients = function() end, OnServerEvent = { Connect = function() end } } end,
-	InitServer = function() end
+	GetEvent = function()
+		return { FireAllClients = function() end, OnServerEvent = { Connect = function() end } }
+	end,
+	InitServer = function() end,
 }
 registerMockModule(RemotesFolder, MockRemotes) -- Remotes is required as a folder in source code? "require(Shared:WaitForChild('Remotes'))" -> It might be a ModuleScript named Remotes.
 -- The source says: `local Remotes = require(Shared:WaitForChild("Remotes"))`.
@@ -178,39 +223,68 @@ registerMockModule(ProcServiceModule, MockProcService)
 -- Mock ClassService
 local ClassServiceModule = createMockInstance("ModuleScript", "ClassService")
 local MockClassService = {
-	GetPlayerClass = function() return "Warrior" end
+	GetPlayerClass = function()
+		return "Warrior"
+	end,
 }
 registerMockModule(ClassServiceModule, MockClassService)
 
+local ItemServiceModule = createMockInstance("ModuleScript", "ItemService")
+local MockItemService = {
+	GetPlayerInventory = function()
+		return {}
+	end,
+}
+registerMockModule(ItemServiceModule, MockItemService)
 
 -- GLOBALS
 local _G = {
 	game = game,
 	Instance = { new = Instance_new },
-	Vector3 = { new = function(x,y,z) return {X=x,Y=y,Z=z, Magnitude=math.sqrt(x*x+y*y+z*z), Unit={X=0,Y=0,Z=0}} end, zero = {X=0,Y=0,Z=0} },
-	task = { delay = function(t, f) f() end, wait = function() end },
+	Vector3 = {
+		new = function(x, y, z)
+			return { X = x, Y = y, Z = z, Magnitude = math.sqrt(x * x + y * y + z * z), Unit = { X = 0, Y = 0, Z = 0 } }
+		end,
+		zero = { X = 0, Y = 0, Z = 0 },
+	},
+	task = {
+		delay = function(t, f)
+			f()
+		end,
+		wait = function() end,
+	},
 	tick = os.clock,
 	math = math,
 	print = function(...) end, -- silence prints
-	warn = function(...) print("WARN:", ...) end,
+	warn = function(...)
+		print("WARN:", ...)
+	end,
 	typeof = typeof,
 	type = type,
 }
-_G.Vector3.new = function(x,y,z)
-	local v = {X=x,Y=y,Z=z}
-	v.Magnitude = math.sqrt(x*x+y*y+z*z)
+MockVector3_new = function(x, y, z)
+	local v = { X = x, Y = y, Z = z }
+	v.Magnitude = math.sqrt(x * x + y * y + z * z)
 	v.Unit = v -- Simplification
 	setmetatable(v, {
-		__add = function(a,b) return _G.Vector3.new(a.X+b.X, a.Y+b.Y, a.Z+b.Z) end,
-		__sub = function(a,b) return _G.Vector3.new(a.X-b.X, a.Y-b.Y, a.Z-b.Z) end,
-		__mul = function(a,b)
-			if type(b) == "number" then return _G.Vector3.new(a.X*b, a.Y*b, a.Z*b) end
-			return _G.Vector3.new(a.X*b.X, a.Y*b.Y, a.Z*b.Z)
-		end
+		__add = function(a, b)
+			return MockVector3_new(a.X + b.X, a.Y + b.Y, a.Z + b.Z)
+		end,
+		__sub = function(a, b)
+			return MockVector3_new(a.X - b.X, a.Y - b.Y, a.Z - b.Z)
+		end,
+		__mul = function(a, b)
+			if type(b) == "number" then
+				return MockVector3_new(a.X * b, a.Y * b, a.Z * b)
+			end
+			return MockVector3_new(a.X * b.X, a.Y * b.Y, a.Z * b.Z)
+		end,
 	})
 	return v
 end
-_G.Vector3.zero = _G.Vector3.new(0,0,0)
+
+_G.Vector3.new = MockVector3_new
+_G.Vector3.zero = MockVector3_new(0, 0, 0)
 
 -- Global require interceptor
 local function mockRequire(module)
@@ -253,8 +327,8 @@ local function expect(value)
 				if value ~= expected then
 					error("Expected " .. tostring(expected) .. " but got " .. tostring(value))
 				end
-			end
-		}
+			end,
+		},
 	}
 end
 
@@ -272,7 +346,9 @@ end
 local originalIt = it
 it = function(name, callback)
 	originalIt(name, function()
-		if _G._beforeEachCallback then _G._beforeEachCallback() end
+		if _G._beforeEachCallback then
+			_G._beforeEachCallback()
+		end
 		callback()
 	end)
 end
@@ -288,7 +364,9 @@ local function loadScript(path, env)
 
 	-- We need to construct the environment
 	local newEnv = setmetatable({}, { __index = _G })
-	for k,v in pairs(env or {}) do newEnv[k] = v end
+	for k, v in pairs(env or {}) do
+		newEnv[k] = v
+	end
 
 	newEnv.require = mockRequire
 	newEnv.game = game
@@ -299,7 +377,11 @@ local function loadScript(path, env)
 		newEnv.script.Parent = createMockInstance("Folder", "Services")
 		-- Add ProcService to Services so `script.Parent.ProcService` works
 		newEnv.script.Parent._children["ProcService"] = ProcServiceModule
+		newEnv.script.Parent.ProcService = ProcServiceModule
 		newEnv.script.Parent._children["ClassService"] = ClassServiceModule
+		newEnv.script.Parent.ClassService = ClassServiceModule
+		newEnv.script.Parent._children["ItemService"] = ItemServiceModule
+		newEnv.script.Parent.ItemService = ItemServiceModule
 	end
 
 	if path:find("CombatService.spec.luau") then
@@ -315,7 +397,9 @@ local function loadScript(path, env)
 
 	-- Luau loadstring
 	local chunk, err = (loadstring or load)(content, path)
-	if not chunk then error(err) end
+	if not chunk then
+		error(err)
+	end
 	setfenv(chunk, newEnv)
 	return chunk
 end
@@ -341,6 +425,7 @@ local specChunk = loadScript("src/server/Services/CombatService.spec.luau", spec
 -- Inject the mocked module into the spec's script.Parent
 local specServicesFolder = getfenv(specChunk).script.Parent
 specServicesFolder._children["CombatService"] = CombatServiceModule
+specServicesFolder.CombatService = CombatServiceModule
 
 -- 3. Run Spec
 print("Running Tests...")
