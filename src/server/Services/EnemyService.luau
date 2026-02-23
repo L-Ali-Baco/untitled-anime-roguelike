@@ -49,6 +49,9 @@ local playerIFrames: { [Player]: number } = {}
 -- Track last dash time for server-side cooldown enforcement
 local playerLastDash: { [Player]: number } = {}
 
+-- OPTIMIZATION: Cache valid player root parts to avoid expensive FindFirstChild calls in hot loops
+local playerCache: { [Player]: BasePart } = {}
+
 -- Type definition for enemy data
 type EnemyData = {
 	Model: Model,
@@ -81,32 +84,80 @@ type EnemyData = {
 local aiUpdateAccumulator = 0
 
 --[[
+    Helper: Update player cache when character spawns
+]]
+local function onCharacterAdded(player: Player, character: Model)
+	if not character then
+		return
+	end
+
+	-- Wait for root part to replicate (async in some cases, but usually immediate on server)
+	-- On server, WaitForChild is generally safe.
+	local rootPart = character:WaitForChild("HumanoidRootPart", 5)
+	if rootPart and character.Parent and rootPart.Parent then
+		playerCache[player] = rootPart
+
+		-- Handle character destroying/reparenting (unlikely but safe)
+		character.AncestryChanged:Connect(function(_, parent)
+			if not parent then
+				playerCache[player] = nil
+			end
+		end)
+
+		-- Also update if root part is destroyed separately
+		rootPart.AncestryChanged:Connect(function(_, parent)
+			if not parent then
+				playerCache[player] = nil
+			end
+		end)
+	end
+end
+
+--[[
+    Helper: Setup player tracking
+]]
+local function onPlayerAdded(player: Player)
+	if player.Character then
+		task.spawn(function()
+			onCharacterAdded(player, player.Character)
+		end)
+	end
+
+	player.CharacterAdded:Connect(function(character)
+		onCharacterAdded(player, character)
+	end)
+
+	player.CharacterRemoving:Connect(function()
+		playerCache[player] = nil
+	end)
+end
+
+--[[
     Get the nearest player to an enemy within aggro range
+    OPTIMIZED: Uses playerCache to avoid GetPlayers() + FindFirstChild() iteration
 ]]
 local function getNearestPlayer(enemyPosition: Vector3, aggroRange: number): Player?
 	local nearestPlayer: Player? = nil
 	local nearestDistance = aggroRange
 
-	for _, player in Players:GetPlayers() do
-		local character = player.Character
-		if not character then
-			continue
-		end
-
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		if not humanoid or humanoid.Health <= 0 then
-			continue
-		end
-
-		local rootPart = character:FindFirstChild("HumanoidRootPart")
-		if not rootPart then
+	-- Iterate over cached root parts directly
+	for player, rootPart in pairs(playerCache) do
+		-- Basic validation: RootPart must be in workspace
+		if not rootPart or not rootPart.Parent then
 			continue
 		end
 
 		local distance = (rootPart.Position - enemyPosition).Magnitude
 		if distance < nearestDistance then
-			nearestDistance = distance
-			nearestPlayer = player
+			-- Verify alive status lazily (only if close enough)
+			local character = player.Character
+			if character then
+				local humanoid = character:FindFirstChildOfClass("Humanoid")
+				if humanoid and humanoid.Health > 0 then
+					nearestDistance = distance
+					nearestPlayer = player
+				end
+			end
 		end
 	end
 
@@ -1558,6 +1609,12 @@ end
 function EnemyService:Start()
 	print("[EnemyService] Starting...")
 
+	-- Initialize player tracking
+	for _, player in Players:GetPlayers() do
+		onPlayerAdded(player)
+	end
+	Players.PlayerAdded:Connect(onPlayerAdded)
+
 	-- Register existing enemies in workspace
 	-- Look for models tagged with "Enemy" or matching enemy type names
 	for _, obj in workspace:GetDescendants() do
@@ -1594,8 +1651,9 @@ function EnemyService:Start()
 		end)
 	end
 
-	-- Cleanup I-frame state when player leaves
+	-- Cleanup state when player leaves
 	Players.PlayerRemoving:Connect(function(player)
+		playerCache[player] = nil
 		playerIFrames[player] = nil
 		playerLastDash[player] = nil
 	end)
