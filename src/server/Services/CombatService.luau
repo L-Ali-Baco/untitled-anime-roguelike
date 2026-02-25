@@ -705,6 +705,9 @@ local function onRequestDashHit(player: Player, targetModel: Model?)
 			local hitEnemies = {}
 			local enemiesStruck = 0
 
+			-- OPTIMIZATION: Generate one ID for the whole blast and ensure cleanup to prevent memory leak
+			local attackId = "DashHit_" .. tostring(tick())
+
 			for _, bPart in ipairs(blastParts) do
 				local bModel = bPart:FindFirstAncestorOfClass("Model")
 				if bModel and EnemyLib:IsAlive(bModel) and not hitEnemies[bModel] then
@@ -725,7 +728,7 @@ local function onRequestDashHit(player: Player, targetModel: Model?)
 					CombatService.ApplyDamage(
 						player,
 						bModel,
-						"DashHit_" .. tostring(tick()),
+						attackId,
 						config.Damage,
 						config.Knockback,
 						false,
@@ -735,6 +738,9 @@ local function onRequestDashHit(player: Player, targetModel: Model?)
 			end
 
 			if enemiesStruck > 0 then
+				-- Cleanup hit tracking data
+				table.insert(activeAttacks, { id = attackId, expiry = tick() + 1 })
+
 				local addHeatEvent =
 					require(game:GetService("ReplicatedStorage").Shared.Remotes):GetEvent("AddScrapperHeat")
 				if addHeatEvent then
