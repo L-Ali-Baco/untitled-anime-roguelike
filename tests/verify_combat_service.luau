@@ -16,8 +16,27 @@ local task = require("@lune/task")
 local MockInstances = {}
 local MockModules = {}
 
+-- Vector3 Mock (Must be defined before usage)
+local Vector3 = { new = function(x,y,z) return {X=x,Y=y,Z=z, Magnitude=math.sqrt(x*x+y*y+z*z), Unit={X=0,Y=0,Z=0}} end, zero = {X=0,Y=0,Z=0} }
+Vector3.new = function(x,y,z)
+	local v = {X=x,Y=y,Z=z}
+	v.Magnitude = math.sqrt(x*x+y*y+z*z)
+	v.Unit = v -- Simplification
+	setmetatable(v, {
+		__add = function(a,b) return Vector3.new(a.X+b.X, a.Y+b.Y, a.Z+b.Z) end,
+		__sub = function(a,b) return Vector3.new(a.X-b.X, a.Y-b.Y, a.Z-b.Z) end,
+		__mul = function(a,b)
+			if type(b) == "number" then return Vector3.new(a.X*b, a.Y*b, a.Z*b) end
+			return Vector3.new(a.X*b.X, a.Y*b.Y, a.Z*b.Z)
+		end
+	})
+	return v
+end
+Vector3.zero = Vector3.new(0,0,0)
+
+
 local function createMockInstance(className, name)
-	local self = {
+	local storage = {
 		ClassName = className,
 		Name = name or className,
 		Parent = nil,
@@ -26,46 +45,51 @@ local function createMockInstance(className, name)
 		_tags = {},
 	}
 
-	function self:FindFirstChild(n)
-		return self._children[n]
+    -- Define methods in storage (to be called with proxy as self)
+	function storage:FindFirstChild(n)
+        -- self is proxy. self._children via __index -> storage._children
+		return storage._children[n]
 	end
 
-	function self:FindFirstChildOfClass(c)
-		for _, child in pairs(self._children) do
+	function storage:FindFirstChildOfClass(c)
+		for _, child in pairs(storage._children) do
 			if child.ClassName == c then return child end
 		end
 		return nil
 	end
 
-	function self:WaitForChild(n)
-		-- Simple synchronous mock
-		if not self._children[n] then
-			self._children[n] = createMockInstance("Folder", n)
+	function storage:WaitForChild(n)
+		if not storage._children[n] then
+			storage._children[n] = createMockInstance("Folder", n)
+            storage._children[n].Parent = self -- self is proxy
 		end
-		return self._children[n]
+		return storage._children[n]
 	end
 
-	function self:GetAttribute(n)
-		return self._attributes[n]
+	function storage:GetAttribute(n)
+		return storage._attributes[n]
 	end
 
-	function self:SetAttribute(n, v)
-		self._attributes[n] = v
+	function storage:SetAttribute(n, v)
+		storage._attributes[n] = v
 	end
 
-	function self:GetAttributes()
-		return self._attributes
+	function storage:GetAttributes()
+		return storage._attributes
 	end
 
-	function self:Destroy()
+	function storage:Destroy()
 		self.Parent = nil
 	end
 
-	-- Humanoid specific
+    -- Humanoid specific
 	if className == "Humanoid" then
-		self.Health = 100
-		self.MaxHealth = 100
-		self.TakeDamage = function(s, amt)
+		storage.Health = 100
+		storage.MaxHealth = 100
+		storage.TakeDamage = function(s, amt)
+            -- s is proxy
+            -- we need to modify storage.Health.
+            -- But s.Health = ... will go to __newindex -> update storage
 			s.Health = s.Health - amt
 			if s.Health < 0 then s.Health = 0 end
 		end
@@ -73,21 +97,78 @@ local function createMockInstance(className, name)
 
 	-- Part specific
 	if className == "Part" or className == "MeshPart" then
-		self.Position = Vector3.new(0,0,0)
-		self.CFrame = { LookVector = Vector3.new(0,0,-1) }
+		storage.Position = Vector3.new(0,0,0)
+		storage.CFrame = { LookVector = Vector3.new(0,0,-1) }
 	end
 
-	return self
+    local proxy = {}
+    local mt = {
+        __index = function(t, k)
+            local v = storage[k]
+            if v ~= nil then return v end
+            -- Child lookup
+            if storage._children[k] then return storage._children[k] end
+            return nil
+        end,
+        __newindex = function(t, k, v)
+             if k == "Parent" then
+                 local oldParent = storage.Parent
+                 if oldParent then
+                     -- oldParent is a proxy too. accessing ._children goes to its storage?
+                     -- No, ._children is hidden in storage.
+                     -- We need to access oldParent's storage?
+                     -- This mock is getting tricky.
+                     -- Let's assume oldParent exposes _children via __index?
+                     -- My __index exposes it if it's in storage.
+                     if oldParent._children then
+                         oldParent._children[storage.Name] = nil
+                     end
+                 end
+                 storage.Parent = v
+                 if v then
+                     if v._children then
+                         v._children[storage.Name] = t -- t is proxy
+                     end
+                 end
+             elseif k == "Name" then
+                 local parent = storage.Parent
+                 if parent and parent._children then
+                     parent._children[storage.Name] = nil
+                     parent._children[v] = t
+                 end
+                 storage.Name = v
+             else
+                 storage[k] = v
+             end
+        end,
+        __tostring = function() return storage.Name end
+    }
+    setmetatable(proxy, mt)
+
+    return proxy
 end
 
 local function Instance_new(className, parent)
 	local inst = createMockInstance(className)
-	inst.Parent = parent
+	if parent then
+		inst.Parent = parent
+	end
 	return inst
 end
 
 -- Global Mocks
 local game = createMockInstance("DataModel", "Game")
+
+game.GetService = function(self, name)
+	if self._children[name] then
+		return self._children[name]
+	end
+	-- Fallback for services not explicitly mocked
+	local s = createMockInstance(name, name)
+	self._children[name] = s
+	s.Parent = self
+	return s
+end
 
 local ReplicatedStorage = createMockInstance("ReplicatedStorage", "ReplicatedStorage")
 game._children["ReplicatedStorage"] = ReplicatedStorage
@@ -101,9 +182,21 @@ local CollectionService = {
 		obj._tags[tag] = true
 	end
 }
+game._children["CollectionService"] = CollectionService -- Ensure CollectionService is in game children for GetService
 
 local Players = createMockInstance("Players", "Players")
 game._children["Players"] = Players
+Players.PlayerRemoving = {
+	Connect = function(self, cb) return { Disconnect = function() end } end
+}
+
+local RunService = createMockInstance("RunService", "RunService")
+RunService.IsServer = function() return true end
+RunService.Heartbeat = {
+    Connect = function(self, cb) return { Disconnect = function() end } end
+}
+game._children["RunService"] = RunService
+
 
 -- Setup Folder Structure for require paths
 local Shared = createMockInstance("Folder", "Shared")
@@ -126,6 +219,9 @@ Shared._children["Lib"] = LibFolder
 
 local StatLibModule = createMockInstance("ModuleScript", "StatLib")
 LibFolder._children["StatLib"] = StatLibModule
+
+local EnemyLibModule = createMockInstance("ModuleScript", "EnemyLib")
+LibFolder._children["EnemyLib"] = EnemyLibModule
 
 -- Helper to set mock module data
 local function registerMockModule(instance, data)
@@ -151,6 +247,22 @@ local MockStatLib = {
 	end
 }
 registerMockModule(StatLibModule, MockStatLib)
+
+local MockEnemyLib = {
+    IsAlive = function(self, target)
+        local h = target:FindFirstChild("Humanoid")
+        return h and h.Health > 0
+    end,
+    TakeDamage = function(self, target, amount)
+        local h = target:FindFirstChild("Humanoid")
+        if h then h:TakeDamage(amount) end
+    end,
+    GetHealth = function(self, target)
+        local h = target:FindFirstChild("Humanoid")
+        return h and h.Health or 0
+    end
+}
+registerMockModule(EnemyLibModule, MockEnemyLib)
 
 local MockRemotes = {
 	GetEvent = function() return { FireAllClients = function() end, OnServerEvent = { Connect = function() end } } end,
@@ -182,12 +294,19 @@ local MockClassService = {
 }
 registerMockModule(ClassServiceModule, MockClassService)
 
+-- Mock ItemService
+local ItemServiceModule = createMockInstance("ModuleScript", "ItemService")
+local MockItemService = {
+    GetPlayerInventory = function() return {} end
+}
+registerMockModule(ItemServiceModule, MockItemService)
+
 
 -- GLOBALS
 local _G = {
 	game = game,
 	Instance = { new = Instance_new },
-	Vector3 = { new = function(x,y,z) return {X=x,Y=y,Z=z, Magnitude=math.sqrt(x*x+y*y+z*z), Unit={X=0,Y=0,Z=0}} end, zero = {X=0,Y=0,Z=0} },
+	Vector3 = Vector3,
 	task = { delay = function(t, f) f() end, wait = function() end },
 	tick = os.clock,
 	math = math,
@@ -195,22 +314,12 @@ local _G = {
 	warn = function(...) print("WARN:", ...) end,
 	typeof = typeof,
 	type = type,
+    ipairs = ipairs,
+    pairs = pairs,
+    tostring = tostring,
+    table = table,
+    OverlapParams = { new = function() return { FilterDescendantsInstances = {} } end }
 }
-_G.Vector3.new = function(x,y,z)
-	local v = {X=x,Y=y,Z=z}
-	v.Magnitude = math.sqrt(x*x+y*y+z*z)
-	v.Unit = v -- Simplification
-	setmetatable(v, {
-		__add = function(a,b) return _G.Vector3.new(a.X+b.X, a.Y+b.Y, a.Z+b.Z) end,
-		__sub = function(a,b) return _G.Vector3.new(a.X-b.X, a.Y-b.Y, a.Z-b.Z) end,
-		__mul = function(a,b)
-			if type(b) == "number" then return _G.Vector3.new(a.X*b, a.Y*b, a.Z*b) end
-			return _G.Vector3.new(a.X*b.X, a.Y*b.Y, a.Z*b.Z)
-		end
-	})
-	return v
-end
-_G.Vector3.zero = _G.Vector3.new(0,0,0)
 
 -- Global require interceptor
 local function mockRequire(module)
@@ -300,6 +409,7 @@ local function loadScript(path, env)
 		-- Add ProcService to Services so `script.Parent.ProcService` works
 		newEnv.script.Parent._children["ProcService"] = ProcServiceModule
 		newEnv.script.Parent._children["ClassService"] = ClassServiceModule
+        newEnv.script.Parent._children["ItemService"] = ItemServiceModule
 	end
 
 	if path:find("CombatService.spec.luau") then
