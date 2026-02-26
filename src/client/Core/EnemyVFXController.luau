@@ -97,7 +97,32 @@ local function onEnemyAttack(data)
 		if attackType == "Slam" or (not attackType and data.IsSlam) then
 			AttackVFXPlayer:Play("Slam", hitPosition, damage or 15)
 		elseif attackType == "Swing" then
-			AttackVFXPlayer:Play("Swing", hitPosition, damage or 12, enemy)
+			-- Per-enemy Swing overrides: smaller enemies need a tighter arc
+			local swingOverride = nil
+			if enemy then
+				local enemyType = enemy:GetAttribute("EnemyType")
+				if enemyType == "MossFrog" then
+					swingOverride = {
+						Trail = {
+							Radius = 9,
+							PivotOffset = Vector3.new(0, 1, 0), -- waist height
+							AttachmentSpacing = 0.7, -- thinner ribbon
+							Transparency = NumberSequence.new({
+								NumberSequenceKeypoint.new(0, 0.4),
+								NumberSequenceKeypoint.new(0.4, 0.6),
+								NumberSequenceKeypoint.new(0.8, 0.85),
+								NumberSequenceKeypoint.new(1, 1),
+							}),
+						},
+						CenterOffset = { Forward = 5, Down = -1 },
+					}
+				end
+			end
+			AttackVFXPlayer:Play("Swing", hitPosition, damage or 12, enemy, swingOverride)
+		elseif attackType == "Kick" then
+			-- Kick/lunge: fast low arc. Kick config is already tuned for small enemies;
+			-- no per-enemy override needed here.
+			AttackVFXPlayer:Play("Kick", hitPosition, damage or 10, enemy)
 		elseif attackType == "LeapStart" then
 			AttackVFXPlayer:Play("LeapStart", hitPosition, damage or 25, enemy)
 		elseif attackType == "LeapSlam" then

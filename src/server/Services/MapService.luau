@@ -59,44 +59,8 @@ function MapService:LoadMap(mapName: string)
 
 	local mapTemplate = mapsFolder:FindFirstChild(mapName)
 	if not mapTemplate then
-		warn("[MapService] Map not found:", mapName, "- Using placeholder baseplate")
-
-		-- Create a dummy map if not found
-		local dummyMap = Instance.new("Model")
-		dummyMap.Name = "PlaceholderMap"
-
-		local floor = Instance.new("Part")
-		floor.Name = "Floor"
-		floor.Size = Vector3.new(200, 1, 200)
-		floor.Position = Vector3.new(0, -1, 0)
-		floor.Anchored = true
-		floor.Color = Color3.fromRGB(50, 50, 50)
-		floor.Parent = dummyMap
-
-		-- Add some spawn points
-		for i = 1, 4 do
-			local spawn = Instance.new("Part")
-			spawn.Name = "EnemySpawn"
-			spawn.Size = Vector3.new(2, 2, 2)
-			spawn.Position = Vector3.new(math.random(-50, 50), 2, math.random(-50, 50))
-			spawn.Anchored = true
-			spawn.Transparency = 0.8
-			spawn.CanCollide = false
-			spawn.Color = Color3.fromRGB(255, 0, 0)
-			CollectionService:AddTag(spawn, MapConfig.Tags.SpawnPoint)
-			spawn.Parent = dummyMap
-		end
-
-		local pSpawn = Instance.new("Part")
-		pSpawn.Name = "PlayerSpawn"
-		pSpawn.Position = Vector3.new(0, 5, 0)
-		pSpawn.Anchored = true
-		pSpawn.Transparency = 1
-		CollectionService:AddTag(pSpawn, MapConfig.Tags.PlayerSpawn)
-		pSpawn.Parent = dummyMap
-
-		currentMapModel = dummyMap
-		currentMapModel.Parent = Workspace
+		warn("[MapService] Map not found:", mapName, "- skipping placeholder, using fallback spawn positions")
+		-- No dummy map spawned — GetRandomEnemySpawn and GetPlayerSpawn return safe fallback positions.
 	else
 		-- Clone real map
 		currentMapModel = mapTemplate:Clone()

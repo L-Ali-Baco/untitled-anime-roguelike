@@ -7,54 +7,64 @@
 return {
 	-- Combo system
 	Combo = {
-		MaxHits = 3, -- Number of hits in combo chain
-		ResetTime = 0.5, -- Seconds of no attack before combo resets
-		AutoAttackInterval = 0.35, -- Time between auto attacks when holding
+		MaxHits = 3,
+		ResetTime = 2.5, -- Seconds of inactivity before combo resets (was 0.5 — too short, cut off hit 3)
+		AutoAttackInterval = 0.35,
 		MovementSpeedMultiplier = 0.5, -- Movement speed during attacks (50%)
 		CanDashCancel = true, -- Whether dash can cancel attacks
 	},
 
 	-- Attack data per combo hit
-	-- Duration = total attack time, HitTime = when hitbox activates
+	-- Duration = how long this hit phase lasts before the next can start
+	-- AbsoluteHitTime = timestamp (seconds from animation start) when the hitbox should fire.
+	--   This is used by performAttack when a single animation spans the full combo.
+	--   Hit 1 starts the animation; hits 2+3 inherit the same running track.
+	-- AnimationId on [1] is the shared combo animation — [2] and [3] intentionally nil.
 	Attacks = {
 		[1] = {
-			Name = "Slash1",
-			Damage = 10,
-			Duration = 0.3, -- Total attack duration
-			HitTime = 0.1, -- When hitbox becomes active
-			HitDuration = 0.2, -- How long hitbox stays active (increased for visibility)
-			HitboxSize = Vector3.new(12, 6, 14), -- Much larger hitbox
-			HitboxOffset = Vector3.new(0, 0, 7), -- Further forward
+			Name = "Swing1",
+			Damage = 18, -- Solid opener for a slow, heavy character
+			AnimationId = "rbxassetid://119554236821479", -- Full 3-hit combo (fixed stretch)
+			Duration = 0.65,
+			HitTime = 0.29,
+			AbsoluteHitTime = 0.29,
+			HitDuration = 0.15,
+			-- Swing 1: left-to-right slash — bias hitbox slightly left
+			HitboxSize = Vector3.new(10, 5, 12),
+			HitboxOffset = Vector3.new(-1.5, 0, 6),
 			Hitstop = 0.03,
-			ScreenShake = 0.3,
+			ScreenShake = 0.25,
 			Knockback = 5,
-			AnimationId = nil, -- Use default R15 punch for now
 		},
 		[2] = {
-			Name = "Slash2",
-			Damage = 12,
-			Duration = 0.3,
-			HitTime = 0.1,
-			HitDuration = 0.2,
-			HitboxSize = Vector3.new(12, 6, 14), -- Much larger hitbox
-			HitboxOffset = Vector3.new(0, 0, 7),
-			Hitstop = 0.04,
-			ScreenShake = 0.4,
-			Knockback = 6,
+			Name = "Swing2",
+			Damage = 28, -- Follow-through, builds momentum
 			AnimationId = nil,
+			Duration = 0.65,
+			HitTime = 0.35,
+			AbsoluteHitTime = 1.0,
+			HitDuration = 0.15,
+			-- Swing 2: right-to-left follow-through — wider arc, bias right
+			HitboxSize = Vector3.new(13, 6, 14),
+			HitboxOffset = Vector3.new(1.5, 0, 7),
+			Hitstop = 0.05,
+			ScreenShake = 0.45,
+			Knockback = 7,
 		},
 		[3] = {
 			Name = "Finisher",
-			Damage = 20,
-			Duration = 0.4, -- Slightly longer for finisher
-			HitTime = 0.15,
-			HitDuration = 0.25, -- Longer visibility for finisher
-			HitboxSize = Vector3.new(14, 8, 18), -- Even larger hitbox for finisher
-			HitboxOffset = Vector3.new(0, 0, 9),
-			Hitstop = 0.1, -- Big hitstop for impact
-			ScreenShake = 0.8, -- Heavy shake
-			Knockback = 12,
+			Damage = 48, -- Big finisher reward (~2.7× hit 1)
 			AnimationId = nil,
+			Duration = 0.60,
+			HitTime = 0.09,
+			AbsoluteHitTime = 1.39,
+			HitDuration = 0.22,
+			-- Finisher: wide powerful strike — biggest hitbox, slight upward for impact feel
+			HitboxSize = Vector3.new(15, 8, 18),
+			HitboxOffset = Vector3.new(0, 0.5, 9),
+			Hitstop = 0.12,
+			ScreenShake = 0.9,
+			Knockback = 14,
 		},
 	},
 

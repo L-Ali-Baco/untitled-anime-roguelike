@@ -31,9 +31,18 @@ function CombatLib.getEnemiesInRadius(position: Vector3, radius: number, exclude
 				CollectionService:HasTag(model, CombatConfig.Targeting.TargetTag)
 				or CollectionService:HasTag(model, "TrainingDummy")
 			then
-				local hum = model:FindFirstChildOfClass("Humanoid")
-				if hum and hum.Health > 0 then
-					table.insert(enemies, model)
+				-- Attribute-based enemies (IsEnemy / Health / IsDead)
+				if model:GetAttribute("IsEnemy") then
+					local health = model:GetAttribute("Health") or 0
+					if health > 0 and not model:GetAttribute("IsDead") then
+						table.insert(enemies, model)
+					end
+				else
+					-- Fallback: Humanoid-based (TrainingDummy, legacy targets)
+					local hum = model:FindFirstChildOfClass("Humanoid")
+					if hum and hum.Health > 0 then
+						table.insert(enemies, model)
+					end
 				end
 			end
 		end

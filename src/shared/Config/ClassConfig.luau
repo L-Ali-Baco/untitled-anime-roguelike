@@ -25,11 +25,20 @@ return {
 
 		-- Custom character model settings
 		CustomModel = "VanguardRig", -- Model name in ReplicatedStorage
-		RootPartName = "HumanoidRootPart", -- Name of the root part (instead of HumanoidRootPart)
-		RunAnimationId = "rbxassetid://125097643282975", -- Custom run animation (Updated)
-		IsCustomRig = true, -- Flag for special handling
-		HipHeight = 3.2, -- Height above ground (Adjusted to 3.2 for perfect float)
-		FacingOffset = 180, -- Rotate model 180 degrees to face forward correctly
+		RootPartName = "HumanoidRootPart",
+		IsCustomRig = true,
+
+		-- Animation IDs (these are set as attributes on the spawned character by ClassService
+		-- and read by ClassController.setupCustomCharacterAnimations)
+		IdleAnimationId = "rbxassetid://77082417243773", -- Neutral stance
+		RunAnimationId = "rbxassetid://139592018369839", -- Running animation
+
+		-- HipHeight: distance from floor to root part centre.
+		-- Increase if character sinks into ground, decrease if it floats.
+		-- Tune in Studio: select VanguardRig → Humanoid → HipHeight until it sits flush.
+		HipHeight = 5.5,
+
+		FacingOffset = 180, -- Rotate model 180° to face forward correctly
 	},
 
 	-- Scrapper: Ranged fighter with rapid-fire bullets

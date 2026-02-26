@@ -276,6 +276,140 @@ function CombatEffects:SpawnFireHitEffect(position: Vector3, comboHit: number?)
 end
 
 --[[
+    Vanguard M1 slash hit effect.
+    Hot yellow-white core → vivid magenta → near-black dark purple, matching Iron Grip aesthetic.
+    comboHit 1 = light spark, 2 = medium slash, 3 = heavy burst + ground ring.
+]]
+function CombatEffects:SpawnVanguardHitEffect(position: Vector3, comboHit: number?)
+	comboHit = comboHit or 1
+
+	-- Palette (mirrors IronGripVFX)
+	local HOT_CORE = Color3.fromRGB(255, 255, 180)
+	local MID_MAGENTA = Color3.fromRGB(255, 50, 200)
+	local EDGE_DARK = Color3.fromRGB(40, 5, 60)
+
+	local slashColorSeq = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, HOT_CORE),
+		ColorSequenceKeypoint.new(0.4, MID_MAGENTA),
+		ColorSequenceKeypoint.new(1, EDGE_DARK),
+	})
+
+	local att = Instance.new("Attachment")
+	att.WorldPosition = position
+	att.Parent = workspace.Terrain
+
+	-- ── Spark burst (scales with combo hit) ──
+	local sparks = Instance.new("ParticleEmitter")
+	sparks.Color = slashColorSeq
+	sparks.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.4 + comboHit * 0.15),
+		NumberSequenceKeypoint.new(0.3, 0.25),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	sparks.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(0.6, 0.3),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	sparks.LightEmission = 1
+	sparks.LightInfluence = 0
+	sparks.Lifetime = NumberRange.new(0.08, 0.18 + comboHit * 0.04)
+	sparks.Speed = NumberRange.new(12 + comboHit * 4, 28 + comboHit * 6)
+	sparks.SpreadAngle = Vector2.new(60, 60)
+	sparks.Drag = 6
+	sparks.Rate = 0
+	sparks.Parent = att
+	sparks:Emit(8 + comboHit * 6)
+
+	-- ── Flash ball (hot-core → fade) ──
+	local flash = Instance.new("Part")
+	flash.Name = "VanguardHitFlash"
+	flash.Anchored = true
+	flash.CanCollide = false
+	flash.CanQuery = false
+	flash.CanTouch = false
+	flash.CastShadow = false
+	flash.Material = Enum.Material.Neon
+	flash.Color = HOT_CORE
+	flash.Transparency = 0.1
+	flash.Shape = Enum.PartType.Ball
+	local flashSize = 0.8 + comboHit * 0.5
+	flash.Size = Vector3.new(flashSize, flashSize, flashSize)
+	flash.Position = position
+	flash.Parent = workspace
+
+	local flashTween = TweenService:Create(
+		flash,
+		TweenInfo.new(0.1 + comboHit * 0.02, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Size = Vector3.new(flashSize * 2.2, flashSize * 2.2, flashSize * 2.2), Transparency = 1 }
+	)
+	flashTween:Play()
+	Debris:AddItem(flash, 0.18)
+
+	-- ── PointLight pulse ──
+	local light = Instance.new("PointLight")
+	light.Color = MID_MAGENTA
+	light.Brightness = 2 + comboHit
+	light.Range = 10 + comboHit * 3
+	light.Parent = flash
+	TweenService:Create(light, TweenInfo.new(0.15), { Brightness = 0 }):Play()
+
+	-- ── Finisher extras: ground shockwave ring + extra embers ──
+	if comboHit >= 3 then
+		-- Shockwave ring
+		local ring = Instance.new("Part")
+		ring.Name = "FinisherRing"
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.CanQuery = false
+		ring.CanTouch = false
+		ring.CastShadow = false
+		ring.Material = Enum.Material.Neon
+		ring.Color = MID_MAGENTA
+		ring.Transparency = 0.2
+		ring.Size = Vector3.new(1, 0.12, 1)
+		ring.CFrame = CFrame.new(position) * CFrame.Angles(math.rad(90), 0, 0)
+		ring.Parent = workspace
+		local ringMesh = Instance.new("CylinderMesh")
+		ringMesh.Parent = ring
+
+		TweenService:Create(
+			ring,
+			TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Size = Vector3.new(18, 0.12, 18), Transparency = 1 }
+		):Play()
+		Debris:AddItem(ring, 0.35)
+
+		-- Ember burst (floats upward)
+		local embers = Instance.new("ParticleEmitter")
+		embers.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, HOT_CORE),
+			ColorSequenceKeypoint.new(0.5, MID_MAGENTA),
+			ColorSequenceKeypoint.new(1, EDGE_DARK),
+		})
+		embers.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.25),
+			NumberSequenceKeypoint.new(1, 0),
+		})
+		embers.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		embers.LightEmission = 1
+		embers.LightInfluence = 0
+		embers.Lifetime = NumberRange.new(0.3, 0.6)
+		embers.Speed = NumberRange.new(4, 10)
+		embers.SpreadAngle = Vector2.new(40, 40)
+		embers.Rotation = NumberRange.new(0, 360)
+		embers.Rate = 0
+		embers.Parent = att
+		embers:Emit(20)
+	end
+
+	Debris:AddItem(att, 0.7)
+end
+
+--[[
     Spawn all hit effects at once
 ]]
 function CombatEffects:SpawnHitEffects(position: Vector3, normal: Vector3?, comboHit: number)

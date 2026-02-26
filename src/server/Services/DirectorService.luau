@@ -38,6 +38,16 @@ local eventCooldowns = {
 	LightningStrike = 0,
 }
 
+-- =========================================================
+-- CREDIT BUDGET DIRECTOR STATE
+-- These variables drive the primary Lull / Ramp spawn loop.
+-- See updateCreditDirector() below for the state machine.
+-- =========================================================
+local directorCredits = 0 -- Current credit balance
+local directorState = "Lull" -- "Ramp" | "Lull"
+local lullEndTime = 0 -- tick() when the current lull expires
+local lastSpawnTick = 0 -- tick() of the last credit-funded spawn
+
 -- References to other services (set in Start)
 local EnemyService = nil
 
@@ -277,6 +287,152 @@ local function tryHordeWave(difficulty: number, now: number, force: boolean?): b
 end
 
 --[[
+    updateCreditDirector
+    ─────────────────────────────────────────────────────────
+    The primary enemy spawn driver. Replaces the old per-event
+    random roll system as the main source of new enemies.
+
+    CREDIT GROWTH:
+        credits/sec = BaseGrowthRate + (diff - 1.0) × ScalingGrowthRate
+        This scales naturally with difficulty so late-game
+        waves arrive faster without tuning spawn intervals.
+
+    PACING STATE MACHINE:
+        Lull  → Director earns credits quietly. No spawns.
+                Transitions to Ramp when credits >= SpendThreshold
+                AND the lull timer has expired.
+        Ramp  → Spends credits every SpawnTickInterval seconds.
+                Picks elite (Brute) or grunt based on difficulty.
+                Transitions to Lull when credits <= LullThreshold.
+
+    ELITE SCALING:
+        eliteChance = clamp((difficulty - 2.0) × 0.2, 0, 0.35)
+        • At difficulty 1.0 → 0%   Brute chance
+        • At difficulty 2.0 → 0%   Brute chance (starts here)
+        • At difficulty 3.75 → 35% Brute chance (capped)
+    ─────────────────────────────────────────────────────────
+]]
+local function updateCreditDirector(now: number)
+	if not isRunning then
+		return
+	end
+	if not EnemyService then
+		return
+	end
+
+	local cfg = DirectorConfig.Credits
+	if not cfg then
+		-- Config not yet updated — silently skip
+		return
+	end
+
+	-- ── 1. Earn credits (scales with current difficulty) ──────
+	-- Growth rate is proportional to difficulty so harder runs
+	-- generate pressure faster, matching the RoR2 experience.
+	local growthRate = cfg.BaseGrowthRate + (currentDifficulty - DirectorConfig.BaseDifficulty) * cfg.ScalingGrowthRate
+	-- Accumulate over the UpdateInterval tick period
+	directorCredits = math.min(directorCredits + growthRate * DirectorConfig.UpdateInterval, cfg.MaxCredits)
+
+	-- ── 2. Lull → Ramp transition ─────────────────────────────
+	if directorState == "Lull" then
+		if directorCredits >= cfg.SpendThreshold and now >= lullEndTime then
+			directorState = "Ramp"
+			print(
+				string.format(
+					"[Director] ► RAMP   | Credits: %d | Difficulty: %.2f",
+					math.floor(directorCredits),
+					currentDifficulty
+				)
+			)
+		end
+		return -- No spawning during Lull
+	end
+
+	-- ── 3. Ramp → Lull transition ─────────────────────────────
+	if directorCredits <= cfg.LullThreshold then
+		directorState = "Lull"
+		lullEndTime = now + cfg.LullDuration
+		print(string.format("[Director] ● LULL   | Recharging for %.1fs", cfg.LullDuration))
+		return
+	end
+
+	-- ── 4. Enemy cap: pause spending if at capacity ───────────
+	-- ── 4. Enemy cap: pause spending if at capacity ───────────
+	-- Cap is defined in EnemyConfig.AI.MaxActiveEnemies (default 50).
+	local enemyCount = EnemyService:GetEnemyCount()
+	local enemyCap = 50 -- fallback
+	do
+		local ok, ec = pcall(function()
+			return require(
+				game:GetService("ReplicatedStorage")
+					:WaitForChild("Shared")
+					:WaitForChild("Config")
+					:WaitForChild("EnemyConfig")
+			).AI.MaxActiveEnemies
+		end)
+		if ok and type(ec) == "number" then
+			enemyCap = ec
+		end
+	end
+	if enemyCount >= enemyCap then
+		return
+	end
+
+	-- ── 5. Spawn tick throttle ────────────────────────────────
+	-- SpawnTickInterval controls the rhythm of a wave.
+	-- The Director won't spawn faster than this even with full credits.
+	if now - lastSpawnTick < cfg.SpawnTickInterval then
+		return
+	end
+	lastSpawnTick = now
+
+	-- ── 6. Pick enemy type ────────────────────────────────────
+	-- Elite chance scales smoothly from 0% (diff 2.0) to 35% (diff 3.75+).
+	-- Elites cost 5 credits so they appear naturally less often.
+	local spawnType: string
+	local spawnCost: number
+
+	local eliteChance = math.clamp((currentDifficulty - 2.0) * 0.2, 0, 0.35)
+	if math.random() < eliteChance and directorCredits >= cfg.SpawnCosts.Elite then
+		spawnType = "Brute"
+		spawnCost = cfg.SpawnCosts.Elite
+	else
+		-- Weighted grunt table: Minions are most common, others flavour the mix
+		local grunts = {
+			"Minion",
+			"Minion",
+			"Minion", -- 3/7 ≈ 43%
+			"MossFrog",
+			"MossFrog", -- 2/7 ≈ 29%
+			"Shooter", -- 1/7 ≈ 14%
+			"Brute", -- 1/7 ≈ 14% (low-cost "budget elite")
+		}
+		-- Block Brute if we can't afford the elite cost
+		local roll = grunts[math.random(#grunts)]
+		if roll == "Brute" and directorCredits < cfg.SpawnCosts.Elite then
+			roll = "Minion" -- downgrade to grunt
+		end
+		spawnType = roll
+		spawnCost = if roll == "Brute" then cfg.SpawnCosts.Elite else cfg.SpawnCosts.Grunt
+	end
+
+	-- ── 7. Find spawn position near a random player ───────────
+	local spawnPos = getSpawnPositionNearPlayers(40)
+	if not spawnPos then
+		return
+	end
+
+	-- ── 8. Spend credits and call EnemyService ────────────────
+	local enemy = EnemyService:SpawnEnemy(spawnType, spawnPos)
+	if enemy then
+		directorCredits = directorCredits - spawnCost
+		-- Uncomment for verbose spawn logging:
+		-- print(string.format("[Director] Spawned %-10s | -%d cr | Bank: %d",
+		--     spawnType, spawnCost, math.floor(directorCredits)))
+	end
+end
+
+--[[
     Main update loop
 ]]
 local function onHeartbeat(deltaTime: number)
@@ -318,7 +474,12 @@ local function onHeartbeat(deltaTime: number)
 		print("[DirectorService] DIFFICULTY TIER:", tier.Name, "(" .. string.format("%.2f", currentDifficulty) .. "x)")
 	end
 
-	-- Try to trigger events
+	-- ── Primary spawn driver: Credit Budget ───────────────────
+	updateCreditDirector(now)
+
+	-- ── Supplemental events (elite/horde on random triggers) ──
+	-- These fire rarely on top of the credit-funded waves,
+	-- adding surprise spikes. Forced via /elite and /horde commands.
 	tryEliteSpawn(currentDifficulty, now)
 	tryHordeWave(currentDifficulty, now)
 end
@@ -397,7 +558,13 @@ function DirectorService:StartRun()
 	isRunning = true
 	lastUpdateTime = 0
 
-	-- Reset cooldowns
+	-- Reset credit director state
+	directorCredits = 0
+	directorState = "Lull"
+	lullEndTime = 0
+	lastSpawnTick = 0
+
+	-- Reset event cooldowns
 	for event in eventCooldowns do
 		eventCooldowns[event] = 0
 	end
@@ -423,6 +590,11 @@ end
 ]]
 function DirectorService:EndRun()
 	isRunning = false
+	-- Reset credit state so no phantom credits carry into the next run
+	directorCredits = 0
+	directorState = "Lull"
+	lullEndTime = 0
+	lastSpawnTick = 0
 	local runTime = tick() - runStartTime
 	print(
 		"[DirectorService] RUN ENDED - Duration:",
@@ -430,6 +602,23 @@ function DirectorService:EndRun()
 		"seconds, Final difficulty:",
 		string.format("%.2f", currentDifficulty)
 	)
+end
+
+--[[
+    Get credit director debug info (for dev UI / tooling)
+    Returns the current credit balance and pacing state.
+]]
+function DirectorService:GetCreditDebug(): { Credits: number, State: string, GrowthRate: number }
+	local cfg = DirectorConfig.Credits
+	local growthRate = 0
+	if cfg then
+		growthRate = cfg.BaseGrowthRate + (currentDifficulty - DirectorConfig.BaseDifficulty) * cfg.ScalingGrowthRate
+	end
+	return {
+		Credits = math.floor(directorCredits),
+		State = directorState,
+		GrowthRate = math.floor(growthRate * 10) / 10,
+	}
 end
 
 --[[

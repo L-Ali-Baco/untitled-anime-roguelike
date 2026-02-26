@@ -385,6 +385,26 @@ local function applyClassStats(player: Player, className: string)
 		"Speed:",
 		humanoid.WalkSpeed
 	)
+
+	-- PASSIVE: Battle Hardened (Vanguard only)
+	-- Regenerates Shield at 2/sec up to 25% of MaxHealth.
+	-- The shield attribute is checked by CombatService before subtracting HP.
+	if className == "Vanguard" then
+		local shieldRate = 2 -- shield per second
+		local shieldCapPct = 0.25 -- 25% of MaxHealth
+
+		task.spawn(function()
+			while character and character.Parent and humanoid.Health > 0 do
+				local maxShield = math.floor(humanoid.MaxHealth * shieldCapPct)
+				local current = character:GetAttribute("Shield") or 0
+				if current < maxShield then
+					character:SetAttribute("Shield", math.min(current + shieldRate, maxShield))
+					character:SetAttribute("MaxShield", maxShield)
+				end
+				task.wait(1)
+			end
+		end)
+	end
 end
 
 --[[

@@ -169,7 +169,37 @@ end
     @param config table? - override config (defaults to AttackVFXConfig.Swing)
 ]]
 function AttackVFXPlayer:PlaySwing(position: Vector3, _damage: number, enemyModel: Model?, config: { [string]: any }?)
-	local cfg = config or AttackVFXConfig.Swing
+	-- Deep-merge config override on top of base so partial overrides don't wipe
+	-- out unspecified sections (Trail, WindParticles, GroundDust, etc.)
+	local cfg = AttackVFXConfig.Swing
+	if config then
+		cfg = {}
+		for k, v in AttackVFXConfig.Swing do
+			cfg[k] = v
+		end
+		for k, v in config do
+			cfg[k] = v
+		end
+		-- Deep-merge nested tables that get indexed individually
+		if config.Trail then
+			cfg.Trail = {}
+			for k, v in AttackVFXConfig.Swing.Trail do
+				cfg.Trail[k] = v
+			end
+			for k, v in config.Trail do
+				cfg.Trail[k] = v
+			end
+		end
+		if config.CenterOffset then
+			cfg.CenterOffset = {}
+			for k, v in AttackVFXConfig.Swing.CenterOffset do
+				cfg.CenterOffset[k] = v
+			end
+			for k, v in config.CenterOffset do
+				cfg.CenterOffset[k] = v
+			end
+		end
+	end
 	local enemyRoot, forwardDir, swingDirection = VFXHelpers.getEnemyDirections(enemyModel)
 	local groundPos = VFXHelpers.findGroundPos(position)
 
@@ -316,6 +346,9 @@ function AttackVFXPlayer:Play(
 		self:PlaySlam(position, damage, configOverride)
 	elseif vfxType == "Swing" then
 		self:PlaySwing(position, damage, enemyModel, configOverride)
+	elseif vfxType == "Kick" then
+		-- Fast low arc for kick/lunge attacks. Uses Swing renderer with Kick config as base.
+		self:PlaySwing(position, damage, enemyModel, configOverride or AttackVFXConfig.Kick)
 	elseif vfxType == "LeapStart" then
 		-- Wind-up VFX: reuses slam renderer with the LeapStart config (dust + small crack)
 		self:PlaySlam(position, damage, configOverride or AttackVFXConfig.LeapStart)

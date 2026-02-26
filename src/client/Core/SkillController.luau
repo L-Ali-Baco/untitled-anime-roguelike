@@ -5,6 +5,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
@@ -30,7 +31,7 @@ local localCooldowns = {}
 --[[
     Play skill animation/VFX locally
 ]]
-local function playLocalFeedback(slot)
+local function playLocalFeedback(slot, hitPos: Vector3?)
 	-- Find skill data
 	local className = "Vanguard"
 	if ClassController and ClassController:IsClassSelected() then
@@ -50,7 +51,7 @@ local function playLocalFeedback(slot)
 	local skillData = skills[slot]
 
 	if SkillVFX then
-		SkillVFX:PlaySkillEffect(Players.LocalPlayer, skillData)
+		SkillVFX:PlaySkillEffect(Players.LocalPlayer, skillData, hitPos)
 	end
 end
 
@@ -75,14 +76,63 @@ local function tryUseSkill(slot: string)
 		return
 	end
 
-	-- Send request (Target info removed/ignored as per directional change)
+	local targetDir: Vector3? = nil
+
+	-- AUTO-TARGET: rotate to face the nearest enemy before firing
+	-- This makes skill waves (like Aerial Slash) reliably hit enemies
+	local char = Players.LocalPlayer.Character
+	local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		-- Prefer TargetingController's selected target
+		if TargetingController and TargetingController:HasTarget() then
+			targetDir = TargetingController:GetDirectionToTarget()
+		else
+			-- Fall back: find nearest enemy in radius via CollectionService tag on the model
+			local nearest: BasePart? = nil
+			local nearestDist = 35 -- stud search radius
+			for _, enemyModel in CollectionService:GetTagged("Enemy") do
+				if enemyModel:IsA("Model") then
+					local enemyRoot = enemyModel:FindFirstChild("HumanoidRootPart") :: BasePart?
+						or enemyModel.PrimaryPart
+					if enemyRoot then
+						local dist = (enemyRoot.Position - rootPart.Position).Magnitude
+						if dist < nearestDist then
+							nearestDist = dist
+							nearest = enemyRoot
+						end
+					end
+				end
+			end
+			if nearest then
+				local raw = nearest.Position - rootPart.Position
+				targetDir = Vector3.new(raw.X, 0, raw.Z).Unit
+			end
+		end
+
+		if targetDir then
+			-- Snap rootPart to face the target (flat, no Y tilt)
+			rootPart.CFrame = CFrame.new(rootPart.Position) * CFrame.lookAt(Vector3.zero, targetDir)
+		end
+	end
+
+	-- Compute final target position (either explicit target or forward)
+	local hitPos = nil
+	if rootPart then
+		hitPos = rootPart.Position + (rootPart.CFrame.LookVector * 10)
+		if targetDir then
+			hitPos = rootPart.Position + (targetDir * 10)
+		end
+	end
+
+	-- Send request
 	local remote = Remotes:GetEvent("RequestSkill")
 	if remote then
-		remote:FireServer(slot)
+		remote:FireServer(slot, nil, hitPos)
 	end
 
 	-- PREDICT: Assume success for VFX feel
-	playLocalFeedback(slot)
+	-- Pass the explicitly locked target direction so VFX doesn't rely on live LookVector later
+	playLocalFeedback(slot, hitPos)
 end
 
 --[[

@@ -370,6 +370,48 @@ local function processDamage(attacker: Player, target: Model, attackIndex: numbe
 end
 
 --[[
+    Snap an enemy to melee range before the Finisher lands.
+    Called server-side for attackIndex==3 so the slam always connects
+    even if the player and enemy drifted slightly apart.
+    Uses PivotTo directly — no physics constraints needed for a short snap.
+]]
+local function snapEnemyToMelee(playerCharacter: Model, target: Model)
+	local playerRoot = playerCharacter:FindFirstChild("HumanoidRootPart")
+	local targetRoot = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
+	if not playerRoot or not targetRoot then
+		return
+	end
+
+	-- Only snap if the enemy is within a generous window (prevents teleporting)
+	local dist = (playerRoot.Position - targetRoot.Position).Magnitude
+	if dist > 20 then
+		return
+	end
+
+	-- Neuter AI mover briefly so the snap isn't immediately fought
+	local aiLV = targetRoot:FindFirstChild("EnemyMoveVelocity") :: LinearVelocity?
+	if aiLV then
+		aiLV.MaxForce = 0
+		aiLV.PlaneVelocity = Vector2.zero
+	end
+
+	-- Snap to 2.5 studs in front of player, facing toward player
+	local snapPos = playerRoot.Position + playerRoot.CFrame.LookVector * 2.5
+	local facingAngle = math.atan2(-playerRoot.CFrame.LookVector.X, -playerRoot.CFrame.LookVector.Z)
+	target:PivotTo(CFrame.new(snapPos) * CFrame.Angles(0, facingAngle, 0))
+	targetRoot.AssemblyLinearVelocity = Vector3.zero
+
+	-- Restore AI after 0.35s (finisher animation + knockback window)
+	if aiLV then
+		task.delay(0.35, function()
+			if aiLV.Parent then
+				aiLV.MaxForce = 50000
+			end
+		end)
+	end
+end
+
+--[[
     Handle attack request from client
 ]]
 local function onRequestAttack(player: Player, attackIndex: number, targetOrTargets: any, attackId: any)
@@ -400,6 +442,10 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 	for _, target in targets do
 		local tValid, tError = validateAttack(player, attackIndex, target, attackId)
 		if tValid then
+			-- Finisher: snap enemy to melee range before damage so the slam always lands
+			if attackIndex == 3 and player.Character then
+				snapEnemyToMelee(player.Character, target)
+			end
 			local didDamage, targetDied = processDamage(player, target, attackIndex, attackId)
 
 			if didDamage then
