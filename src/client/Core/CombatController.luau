@@ -1334,6 +1334,20 @@ function CombatController:Start()
 		)
 	end
 
+	-- Batch damage numbers: one remote, array payload, one packet per AoE/proc chain
+	if Remotes and Remotes.ShowDamageNumbers then
+		table.insert(
+			connections,
+			Remotes.ShowDamageNumbers.OnClientEvent:Connect(function(batch: { { any } })
+				if DamageNumbers then
+					for _, entry in ipairs(batch) do
+						DamageNumbers:SpawnOnCharacter(entry[1], entry[2], entry[3])
+					end
+				end
+			end)
+		)
+	end
+
 	print("[CombatController] Started")
 end
 

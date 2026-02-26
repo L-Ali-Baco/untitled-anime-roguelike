@@ -49,6 +49,20 @@ local activeAttacks: { { id: string, expiry: number } } = {}
 -- Track combo state per player to prevent sequence exploits (e.g. skipping to attack 3)
 local playerComboState: { [Player]: { CurrentIndex: number, LastAttackTime: number } } = {}
 
+-- Cached OverlapParams for AoE hit detection. Rebuilt only when player count changes.
+-- Avoids allocating a new OverlapParams + ignoreList on every ranged shot or dash hit.
+local cachedOverlapParams: OverlapParams = OverlapParams.new()
+local function rebuildIgnoreList()
+	local list = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			table.insert(list, p.Character)
+		end
+	end
+	cachedOverlapParams.FilterDescendantsInstances = list
+	cachedOverlapParams.FilterType = Enum.RaycastFilterType.Exclude
+end
+
 --[[
     Get the root part of a target (works for players and NPCs)
 ]]
@@ -646,16 +660,9 @@ local function onRequestRangedHit(
 		local hitRadius = config.Radius
 		local shredAmount = config.ShredAmount
 
-		local blastParams = OverlapParams.new()
-		local ignoreList = {}
-		for _, p in ipairs(Players:GetPlayers()) do
-			if p.Character then
-				table.insert(ignoreList, p.Character)
-			end
-		end
-		blastParams.FilterDescendantsInstances = ignoreList
+		rebuildIgnoreList()
 
-		local blastParts = workspace:GetPartBoundsInRadius(hitPosition, hitRadius, blastParams)
+		local blastParts = workspace:GetPartBoundsInRadius(hitPosition, hitRadius, cachedOverlapParams)
 		local hitEnemies = {}
 
 		for _, bPart in ipairs(blastParts) do
@@ -741,16 +748,9 @@ local function onRequestDashHit(player: Player, targetModel: Model?)
 	if rootPart and targetRoot then
 		-- Distance tolerance for slide hits
 		if (rootPart.Position - targetRoot.Position).Magnitude <= 20 then
-			local blastParams = OverlapParams.new()
-			local ignoreList = {}
-			for _, p in ipairs(Players:GetPlayers()) do
-				if p.Character then
-					table.insert(ignoreList, p.Character)
-				end
-			end
-			blastParams.FilterDescendantsInstances = ignoreList
+			rebuildIgnoreList()
 
-			local blastParts = workspace:GetPartBoundsInRadius(targetRoot.Position, config.AOERadius, blastParams)
+			local blastParts = workspace:GetPartBoundsInRadius(targetRoot.Position, config.AOERadius, cachedOverlapParams)
 			local hitEnemies = {}
 			local enemiesStruck = 0
 
@@ -813,6 +813,10 @@ function CombatService:Start()
 	-- Start cleanup loop
 	-- OPTIMIZATION: Batch cleanup operations to reduce scheduler overhead
 	RunService.Heartbeat:Connect(function()
+		-- Skip when nothing to clean up (avoids busy-loop between fights)
+		if #activeAttacks == 0 then
+			return
+		end
 		local now = tick()
 		local removeCount = 0
 
@@ -872,12 +876,18 @@ function CombatService:Start()
 		print("[CombatService] Connected to RequestDashHit remote")
 	end
 
+	-- Rebuild OverlapParams ignore list when player count changes
+	Players.PlayerAdded:Connect(function(player)
+		player.CharacterAdded:Connect(rebuildIgnoreList)
+		player.CharacterRemoving:Connect(rebuildIgnoreList)
+	end)
 	-- Cleanup when player leaves
 	Players.PlayerRemoving:Connect(function(player)
 		playerLastAttack[player] = nil
 		playerLastRangedAttack[player] = nil
 		playerLastAttackId[player] = nil
 		playerComboState[player] = nil
+		rebuildIgnoreList()
 	end)
 
 	print("[CombatService] Started successfully")

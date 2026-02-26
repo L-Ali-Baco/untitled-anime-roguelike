@@ -307,6 +307,7 @@ function ScrapperSkills.TripWireEnd(player: Player, aimPos: Vector3?)
 
 					local Remotes = require(game:GetService("ReplicatedStorage").Shared.Remotes)
 					local hitEnemies = {}
+					local damageNumberBatch = {}
 					local enemiesStruck = 0
 					local slowDuration = SkillConfig.Scrapper.Skill1.SlowDuration or 2.0
 					local slowFactor = SkillConfig.Scrapper.Skill1.SlowFactor or 0.3
@@ -339,10 +340,16 @@ function ScrapperSkills.TripWireEnd(player: Player, aimPos: Vector3?)
 								end
 							end)
 
-							local showDamageRemote = Remotes:GetEvent("ShowDamageNumber")
-							if showDamageRemote then
-								showDamageRemote:FireAllClients(bModel, SkillConfig.Scrapper.Skill1.Damage, "Skill")
-							end
+							-- Collected for batch fire after the loop (see ShowDamageNumbers below)
+							table.insert(damageNumberBatch, { bModel, SkillConfig.Scrapper.Skill1.Damage, "Skill" })
+						end
+					end
+
+					-- Send all damage numbers in one packet instead of N separate FireAllClients calls
+					if #damageNumberBatch > 0 then
+						local batchRemote = Remotes:GetEvent("ShowDamageNumbers")
+						if batchRemote then
+							batchRemote:FireAllClients(damageNumberBatch)
 						end
 					end
 

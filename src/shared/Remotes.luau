@@ -25,6 +25,7 @@ local REMOTE_EVENTS = {
 	"SkillUsed", -- Server -> Clients: Skill successfully used (for VFX/Cooldowns)
 	"SkillCooldown", -- Server -> Client: Skill failed/cooldown sync
 	"ShowDamageNumber", -- Server -> All Clients: Display damage number on target
+	"ShowDamageNumbers", -- Server -> All Clients: Batch damage numbers (array of {target, damage, type})
 
 	-- Enemy AI
 	"EnemyAttack", -- Server -> Clients: Enemy attacked a player (for VFX)

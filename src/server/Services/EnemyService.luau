@@ -48,6 +48,19 @@ local playerLastDash: { [Player]: number } = {}
 -- AI update budget accumulator
 local aiUpdateAccumulator = 0
 
+-- Attack token counters: { [Player]: number of enemies in attack state vs that player }
+-- Maintained via notifyAttackStart/notifyAttackEnd in the services bag.
+-- Replaces the O(n²) full-table scan that the original canAttack used.
+local attackerCounts: { [Player]: number } = {}
+
+-- Running enemy count — O(1) alternative to iterating activeEnemies for cap checks.
+local activeEnemyCount = 0
+
+-- EnemyStateChanged deduplication: tracks the last-sent state and send time per model.
+-- Prevents spamming 600 remote deliveries/second on busy fights.
+local lastSentState: { [Model]: string } = {}
+local lastStateSentTime: { [Model]: number } = {}
+
 -- Cached service references (populated in Start)
 local MovementServiceRef: any = nil
 
@@ -128,8 +141,22 @@ local function buildServicesBag(): any
 			end
 		end,
 
-		-- Replicate AI state change (for client VFX/animation controller)
+		-- Replicate AI state change (for client VFX/animation controller).
+		-- Rate-limited: fires at most once per 0.1 s per enemy, and only when state changes.
+		-- Dead state bypasses the rate limit so death VFX always fires.
 		fireEnemyStateChanged = function(model: Model, state: string)
+			local now = tick()
+			local isDead = state == "Dead"
+			if not isDead then
+				if lastSentState[model] == state then
+					return -- Same state; no change to replicate
+				end
+				if (now - (lastStateSentTime[model] or 0)) < 0.1 then
+					return -- Rate cap: max 10 Hz per enemy
+				end
+			end
+			lastSentState[model] = state
+			lastStateSentTime[model] = now
 			local remote = Remotes:GetEvent("EnemyStateChanged")
 			if remote then
 				remote:FireAllClients(model, state)
@@ -141,7 +168,12 @@ local function buildServicesBag(): any
 			local model: Model = payload.Target
 			local enemy = activeEnemies[model]
 			-- Remove from registry immediately so Director credit accounting is accurate
+			if activeEnemies[model] then
+				activeEnemyCount = math.max(0, activeEnemyCount - 1)
+			end
 			activeEnemies[model] = nil
+			lastSentState[model] = nil
+			lastStateSentTime[model] = nil
 			if enemy and MovementServiceRef then
 				MovementServiceRef:Unregister(enemy)
 			end
@@ -156,21 +188,22 @@ local function buildServicesBag(): any
 			return playerIFrames[player]
 		end,
 
-		-- Attack token check: returns true if another enemy may enter Attack state vs this player.
-		-- Counts enemies currently in Attack/LeapAttack/ChargeAttack against the token cap.
-		-- No explicit checkout/return needed — the count is computed live each call.
+		-- Attack token check: O(1) lookup against the maintained counter.
+		-- Enemies call notifyAttackStart/notifyAttackEnd on state transitions.
 		canAttack = function(player: Player): boolean
 			local max = (EnemyConfig.AttackTokens and EnemyConfig.AttackTokens.Normal) or 2
-			local count = 0
-			for _, e in activeEnemies do
-				if
-					e.Target == player
-					and (e.State == "Attack" or e.State == "LeapAttack" or e.State == "ChargeAttack")
-				then
-					count += 1
-				end
-			end
-			return count < max
+			return (attackerCounts[player] or 0) < max
+		end,
+
+		-- Increment the token counter when an enemy enters an attack state.
+		notifyAttackStart = function(player: Player)
+			attackerCounts[player] = (attackerCounts[player] or 0) + 1
+		end,
+
+		-- Decrement the token counter when an enemy leaves an attack state.
+		notifyAttackEnd = function(player: Player)
+			local current = attackerCounts[player] or 0
+			attackerCounts[player] = math.max(0, current - 1)
 		end,
 	}
 end
@@ -321,12 +354,8 @@ function EnemyService:SpawnEnemy(enemyType: string, position: Vector3, parent: I
 		return nil
 	end
 
-	-- Enforce global enemy cap
-	local count = 0
-	for _ in activeEnemies do
-		count += 1
-	end
-	if count >= EnemyConfig.AI.MaxActiveEnemies then
+	-- Enforce global enemy cap (O(1) via maintained counter)
+	if activeEnemyCount >= EnemyConfig.AI.MaxActiveEnemies then
 		return nil
 	end
 
@@ -385,6 +414,7 @@ function EnemyService:SpawnEnemy(enemyType: string, position: Vector3, parent: I
 	end
 
 	activeEnemies[enemyModel] = enemy
+	activeEnemyCount += 1
 	return enemyModel
 end
 
@@ -416,6 +446,7 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?): any?
 	end
 
 	activeEnemies[enemyModel] = enemy
+	activeEnemyCount += 1
 	return enemy
 end
 
@@ -427,11 +458,7 @@ function EnemyService:ApplyHitstun(enemyModel: Model, duration: number?)
 end
 
 function EnemyService:GetEnemyCount(): number
-	local count = 0
-	for _ in activeEnemies do
-		count += 1
-	end
-	return count
+	return activeEnemyCount
 end
 
 function EnemyService:GetActiveEnemies(): { [Model]: any }
@@ -535,17 +562,35 @@ function EnemyService:Start()
 		for model, enemy in activeEnemies do
 			-- Guard: model was destroyed outside normal death flow (e.g. /clear)
 			if not model.Parent then
+				-- Release attack token if this enemy was mid-attack when forcibly removed
+				if
+					enemy.State == "Attack"
+					or enemy.State == "LeapAttack"
+					or enemy.State == "ChargeAttack"
+				then
+					if enemy.Target and typeof(enemy.Target) == "Instance" and enemy.Target:IsA("Player") then
+						attackerCounts[enemy.Target] = math.max(0, (attackerCounts[enemy.Target] or 0) - 1)
+					end
+				end
+				activeEnemyCount = math.max(0, activeEnemyCount - 1)
 				activeEnemies[model] = nil
+				lastSentState[model] = nil
+				lastStateSentTime[model] = nil
 				if MovementServiceRef then
 					MovementServiceRef:Unregister(enemy)
 				end
 				continue
 			end
 
-			pcall(function()
-				enemy:Tick(dt)
-			end)
+			pcall(enemy.Tick, enemy, dt)
 		end
+	end)
+
+	-- Clear attack counter when a player leaves (prevents stale entries)
+	Players.PlayerRemoving:Connect(function(player)
+		attackerCounts[player] = nil
+		playerIFrames[player] = nil
+		playerLastDash[player] = nil
 	end)
 
 	-- Make available globally for DirectorService (keeps existing API)

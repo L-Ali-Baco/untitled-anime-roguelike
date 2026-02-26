@@ -48,6 +48,8 @@ export type Services = {
 	fireEnemyDied: (payload: { [string]: any }) -> (),
 	getIFrameExpiry: (player: Player) -> number?,
 	canAttack: (player: Player) -> boolean,
+	notifyAttackStart: (player: Player) -> (),
+	notifyAttackEnd: (player: Player) -> (),
 }
 
 -- ============================================================
@@ -297,6 +299,12 @@ function BaseEnemy:_onDeath()
 		return
 	end
 	self._destroyed = true
+	-- Release attack token if dying mid-attack
+	if self.State == AIState.Attack or self.State == AIState.LeapAttack or self.State == AIState.ChargeAttack then
+		if self.Target then
+			self._services.notifyAttackEnd(self.Target)
+		end
+	end
 	self.State = AIState.Dead
 
 	self:StopMovement()
@@ -467,6 +475,12 @@ function BaseEnemy:ApplyHitstun(duration: number?)
 
 	local oldState = self.State
 	self.State = AIState.Hitstun
+	-- Release attack token if hitstunned mid-attack
+	if oldState == AIState.Attack or oldState == AIState.LeapAttack or oldState == AIState.ChargeAttack then
+		if self.Target then
+			self._services.notifyAttackEnd(self.Target)
+		end
+	end
 	self.HitstunEndTime = tick() + hitstunDuration
 
 	self.IsMoving = false
@@ -845,7 +859,19 @@ function BaseEnemy:Tick(_dt: number)
 	end
 
 	-- Broadcast state transition to clients (for VFX/animation)
+	-- Also maintain attack token counter when crossing attack/non-attack boundary.
 	if self.State ~= oldState then
+		local wasAttacking = oldState == AIState.Attack or oldState == AIState.LeapAttack or oldState == AIState.ChargeAttack
+		local isAttacking = self.State == AIState.Attack or self.State == AIState.LeapAttack or self.State == AIState.ChargeAttack
+		if wasAttacking and not isAttacking then
+			if self.Target then
+				self._services.notifyAttackEnd(self.Target)
+			end
+		elseif isAttacking and not wasAttacking then
+			if self.Target then
+				self._services.notifyAttackStart(self.Target)
+			end
+		end
 		self._services.fireEnemyStateChanged(self.Model, self.State)
 	end
 end
