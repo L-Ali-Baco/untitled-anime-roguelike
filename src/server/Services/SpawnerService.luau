@@ -28,6 +28,7 @@ local MapService = require(script.Parent.MapService)
 
 -- State
 local spawnPoints = {} -- { [Instance]: { LastSpawnTime: number } }
+local spawningEnabled = true -- toggled by /nospawn and /spawn commands
 local updateAccumulator = 0
 local SPAWN_CHECK_INTERVAL = 2.0 -- Check for spawns every 2 seconds
 
@@ -57,6 +58,35 @@ local function refreshSpawnPoints()
 end
 
 --[[
+    Check if a position falls within any player's forward FOV cone.
+    Spawn points inside this cone are skipped so enemies don't visibly pop in front of the camera.
+]]
+local function isInPlayerFOV(position: Vector3): boolean
+	local fovAngle = (EnemyConfig.Spawn and EnemyConfig.Spawn.FOVExclusionAngle) or 50
+	for _, player in Players:GetPlayers() do
+		local char = player.Character
+		if char and char.PrimaryPart then
+			local rootCF = char.PrimaryPart.CFrame
+			local toSpawn = position - rootCF.Position
+			local flatToSpawn = Vector3.new(toSpawn.X, 0, toSpawn.Z)
+			if flatToSpawn.Magnitude < 1 then
+				continue
+			end
+			local lookFlat = Vector3.new(rootCF.LookVector.X, 0, rootCF.LookVector.Z)
+			if lookFlat.Magnitude < 0.1 then
+				continue
+			end
+			local dot = lookFlat.Unit:Dot(flatToSpawn.Unit)
+			local angle = math.deg(math.acos(math.clamp(dot, -1, 1)))
+			if angle <= fovAngle then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+--[[
     Check if any player is in valid range of a position
 ]]
 local function isInRange(position: Vector3): boolean
@@ -82,7 +112,7 @@ end
     Pick a random enemy type based on simple weights
 ]]
 local function getRandomEnemyType(): string
-	local types = { "Minion", "Minion", "Minion", "Brute", "Shooter" } -- 60% Minion, 20% Brute, 20% Shooter
+	local types = { "Minion", "Minion", "Minion", "Brute", "Brute", "Shooter", "MossFrog" } -- ~43% Minion, 29% Brute, 14% Shooter, 14% MossFrog
 	return types[math.random(#types)]
 end
 
@@ -104,7 +134,7 @@ local function attemptSpawn(point: Instance)
 		return
 	end
 
-	if isInRange(pos) then
+	if isInRange(pos) and not isInPlayerFOV(pos) then
 		-- Check enemy cap
 		if EnemyService:GetEnemyCount() >= EnemyConfig.AI.MaxActiveEnemies then
 			return
@@ -169,6 +199,25 @@ function SpawnerService:Start()
 	refreshSpawnPoints()
 	-- MapService handles map loading, we just read from it
 
+	-- Debug commands
+	local function connectPlayerChat(player: Player)
+		player.Chatted:Connect(function(msg)
+			local cmd = string.lower(string.split(msg, " ")[1])
+			if cmd == "/nospawn" then
+				spawningEnabled = false
+				print("[SpawnerService] Enemy spawning DISABLED")
+			elseif cmd == "/spawn" then
+				spawningEnabled = true
+				print("[SpawnerService] Enemy spawning ENABLED")
+			end
+		end)
+	end
+
+	for _, player in Players:GetPlayers() do
+		connectPlayerChat(player)
+	end
+	Players.PlayerAdded:Connect(connectPlayerChat)
+
 	-- Update loop
 	RunService.Heartbeat:Connect(function(dt)
 		updateAccumulator += dt
@@ -176,8 +225,10 @@ function SpawnerService:Start()
 			updateAccumulator = 0
 
 			refreshSpawnPoints()
-			for point in spawnPoints do
-				attemptSpawn(point)
+			if spawningEnabled then
+				for point in spawnPoints do
+					attemptSpawn(point)
+				end
 			end
 		end
 	end)

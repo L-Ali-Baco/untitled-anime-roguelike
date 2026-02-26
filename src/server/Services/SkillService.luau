@@ -103,27 +103,22 @@ local function onRequestSkill(player: Player, slot: string, target: Model?, aimP
 
 	-- Validate Cooldown
 	local remaining = getCooldownRemaining(player, slot)
-
 	if remaining > 0 then
-		local bypassCooldown = false
-		if configName == "Scrapper" and slot == "Skill1" then
-			local ScrapperSkills = require(script.Parent.Parent.Skills.ScrapperSkills)
-			if ScrapperSkills.IsSpooling and ScrapperSkills.IsSpooling(player) then
-				bypassCooldown = true
-			end
+		local cdRemote = Remotes:GetEvent("SkillCooldown")
+		if cdRemote then
+			cdRemote:FireClient(player, slot, remaining)
 		end
-
-		if not bypassCooldown then
-			-- Tell client to sync cooldown
-			local cdRemote = Remotes:GetEvent("SkillCooldown")
-			if cdRemote then
-				cdRemote:FireClient(player, slot, remaining)
-			end
-			return
-		end
+		return
 	end
 
-	-- Use Skill
+	-- Scrapper Skill1 via RequestSkill is always Phase 1 (start anchor only).
+	-- Cooldown does NOT start here — it starts in the RequestTripWire handler (Phase 2).
+	-- SkillUsed is NOT fired here — the client already optimistically shows the start node.
+	if configName == "Scrapper" and slot == "Skill1" then
+		executeSkill(player, configName, slot, skillData, target, aimPos)
+		return
+	end
+
 	if not cooldowns[player] then
 		cooldowns[player] = {}
 	end
@@ -131,7 +126,6 @@ local function onRequestSkill(player: Player, slot: string, target: Model?, aimP
 
 	executeSkill(player, configName, slot, skillData, target, aimPos)
 
-	-- Notify clients (for VFX)
 	local usedRemote = Remotes:GetEvent("SkillUsed")
 	if usedRemote then
 		usedRemote:FireAllClients(player, slot, skillData)
@@ -146,6 +140,38 @@ function SkillService:Start()
 	local requestRemote = Remotes:GetEvent("RequestSkill")
 	if requestRemote then
 		requestRemote.OnServerEvent:Connect(onRequestSkill)
+	end
+
+	-- RequestTripWire: Phase 2 of Trip-Wire Spool (end anchor + arm trap).
+	-- Using a dedicated remote eliminates all phase-detection ambiguity.
+	local tripWireRemote = Remotes:GetEvent("RequestTripWire")
+	if tripWireRemote then
+		tripWireRemote.OnServerEvent:Connect(function(player: Player, aimPos: Vector3?)
+			local className = ClassService:GetPlayerClass(player) or "Warrior"
+			if className ~= "Scrapper" then
+				return
+			end
+			local ScrapperSkills = require(script.Parent.Parent.Skills.ScrapperSkills)
+			if not ScrapperSkills.IsSpooling(player) then
+				warn("[SkillService] RequestTripWire: player is not spooling —", player.Name)
+				return
+			end
+			-- Set cooldown now that the trap is armed
+			if not cooldowns[player] then
+				cooldowns[player] = {}
+			end
+			cooldowns[player]["Skill1"] = tick()
+			-- Execute Phase 2
+			task.spawn(function()
+				ScrapperSkills.TripWireEnd(player, aimPos)
+			end)
+			-- Notify clients so cooldown bar and VFX fire
+			local skillData = SkillConfig.Scrapper.Skill1
+			local usedRemote = Remotes:GetEvent("SkillUsed")
+			if usedRemote then
+				usedRemote:FireAllClients(player, "Skill1", skillData)
+			end
+		end)
 	end
 
 	Players.PlayerRemoving:Connect(function(player)

@@ -11,6 +11,7 @@ local CollectionService = game:GetService("CollectionService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local ItemRegistry = require(Shared:WaitForChild("Config"):WaitForChild("ItemRegistry"))
+local LootManager = require(Shared:WaitForChild("Lib"):WaitForChild("LootManager"))
 
 local ItemService = {
 	Name = "ItemService",
@@ -25,12 +26,11 @@ local scrapBalances = {}
 -- Active Chests: { [Instance]: boolean }
 local activeChests = {}
 
---[[
-    Get a random item key from the pool
-]]
-local function getRandomItemKey(): string
-	return ItemRegistry.GetRandomItemKey()
-end
+-- Pending W1_Chest selections: tracks the 3 items each player was offered.
+-- Used to validate SelectChestItem so clients can't request arbitrary items.
+-- { [Player]: { string } }
+local pendingSelections: { [Player]: { string } } = {}
+
 
 --[[
     Get player inventory
@@ -72,6 +72,14 @@ function ItemService:GrantItem(player: Player, itemKey: string)
 
 	if not inventories[player] then
 		inventories[player] = {}
+	end
+
+	-- Unique items can only be held once. Silently reject duplicates.
+	if item.Tags and table.find(item.Tags, "Unique") then
+		if (inventories[player][itemKey] or 0) >= 1 then
+			warn(("[ItemService] %s already holds Unique item %s — grant rejected"):format(player.Name, itemKey))
+			return
+		end
 	end
 
 	inventories[player][itemKey] = (inventories[player][itemKey] or 0) + 1
@@ -149,9 +157,11 @@ function ItemService:OpenChest(chest: Instance, player: Player)
 	end
 	activeChests[chest] = nil
 
-	-- Grant random item
-	local itemKey = getRandomItemKey()
-	self:GrantItem(player, itemKey)
+	-- Grant random item (stage 1 fallback for plain chests — no stage context here)
+	local itemKey = LootManager.RollItem(1)
+	if itemKey then
+		self:GrantItem(player, itemKey)
+	end
 
 	-- Cleanup chest
 	chest:Destroy()
@@ -160,7 +170,7 @@ end
 --[[
     Spawn a W1_Chest at a position
 ]]
-function ItemService:SpawnW1Chest(spawnCFrameOrVector: any)
+function ItemService:SpawnW1Chest(spawnCFrameOrVector: any, stageNumber: number?)
 	local chestPrefab = ReplicatedStorage:FindFirstChild("W1_Chest", true)
 	local chest
 
@@ -259,6 +269,9 @@ function ItemService:SpawnW1Chest(spawnCFrameOrVector: any)
 	prompt.RequiresLineOfSight = false
 	prompt.Style = Enum.ProximityPromptStyle.Custom
 
+	-- Store the stage so OpenW1Chest can feed it to LootManager
+	chest:SetAttribute("StageNumber", math.max(1, stageNumber or 1))
+
 	activeChests[chest] = true
 	CollectionService:AddTag(chest, "W1_Chest")
 
@@ -286,14 +299,9 @@ function ItemService:OpenW1Chest(chest: Instance, player: Player)
 	if self:SpendScrap(player, 25) then
 		activeChests[chest] = nil
 
-		-- Get 3 distinct random items
-		local items = {}
-		while #items < 3 do
-			local key = getRandomItemKey()
-			if not table.find(items, key) then
-				table.insert(items, key)
-			end
-		end
+		-- Get 3 distinct weighted items for the current stage
+		local stage = (chest:GetAttribute("StageNumber") :: number?) or 1
+		local items = LootManager.RollDistinctItems(stage, 3)
 
 		-- Disable prompt immediately
 		local prompt = chest:FindFirstChildOfClass("ProximityPrompt")
@@ -307,6 +315,9 @@ function ItemService:OpenW1Chest(chest: Instance, player: Player)
 				chest:Destroy()
 			end
 		end)
+
+		-- Record the offered items so the server can validate the client's choice.
+		pendingSelections[player] = items
 
 		local promptRemote = Remotes:GetEvent("PromptItemSelection")
 		if promptRemote then
@@ -398,6 +409,7 @@ function ItemService:Start()
 	Players.PlayerRemoving:Connect(function(player)
 		inventories[player] = nil
 		scrapBalances[player] = nil
+		pendingSelections[player] = nil
 	end)
 
 	setupDebugCommands()
@@ -406,9 +418,23 @@ function ItemService:Start()
 	local selectRemote = Remotes:GetEvent("SelectChestItem")
 	if selectRemote then
 		selectRemote.OnServerEvent:Connect(function(player, chosenItemKey)
-			if chosenItemKey then
-				self:GrantItem(player, chosenItemKey)
+			-- Validate: the chosen key must be one of the 3 items this player was actually offered.
+			-- Without this check any client can fire SelectChestItem with "GlassCannon" and get it free.
+			local offered = pendingSelections[player]
+			if not offered then
+				warn(("[ItemService] %s sent SelectChestItem with no pending selection"):format(player.Name))
+				return
 			end
+			if not table.find(offered, chosenItemKey) then
+				warn(
+					(
+						"[ItemService] %s tried to select unoffered item %s — rejected"
+					):format(player.Name, tostring(chosenItemKey))
+				)
+				return
+			end
+			pendingSelections[player] = nil
+			self:GrantItem(player, chosenItemKey)
 		end)
 	end
 
