@@ -49,6 +49,15 @@ local playerIFrames: { [Player]: number } = {}
 -- Track last dash time for server-side cooldown enforcement
 local playerLastDash: { [Player]: number } = {}
 
+-- Optimization: Cache players and their characters to avoid frequent FindFirstChild calls
+type CachedPlayer = {
+	Player: Player,
+	Character: Model,
+	RootPart: BasePart,
+	Humanoid: Humanoid,
+}
+local playerCache: { [Player]: CachedPlayer } = {}
+
 -- Type definition for enemy data
 type EnemyData = {
 	Model: Model,
@@ -87,26 +96,16 @@ local function getNearestPlayer(enemyPosition: Vector3, aggroRange: number): Pla
 	local nearestPlayer: Player? = nil
 	local nearestDistance = aggroRange
 
-	for _, player in Players:GetPlayers() do
-		local character = player.Character
-		if not character then
+	-- Iterate over cached players instead of calling API
+	for _, data in playerCache do
+		if data.Humanoid.Health <= 0 then
 			continue
 		end
 
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		if not humanoid or humanoid.Health <= 0 then
-			continue
-		end
-
-		local rootPart = character:FindFirstChild("HumanoidRootPart")
-		if not rootPart then
-			continue
-		end
-
-		local distance = (rootPart.Position - enemyPosition).Magnitude
+		local distance = (data.RootPart.Position - enemyPosition).Magnitude
 		if distance < nearestDistance then
 			nearestDistance = distance
-			nearestPlayer = player
+			nearestPlayer = data.Player
 		end
 	end
 
@@ -1598,7 +1597,63 @@ function EnemyService:Start()
 	Players.PlayerRemoving:Connect(function(player)
 		playerIFrames[player] = nil
 		playerLastDash[player] = nil
+		playerCache[player] = nil
 	end)
+
+	-- Maintain Player Cache
+	local function setupPlayer(player: Player)
+		local function onCharacterAdded(character: Model)
+			-- Wait for character components
+			local root = character:WaitForChild("HumanoidRootPart", 5)
+			local humanoid = character:WaitForChild("Humanoid", 5)
+
+			-- Safety check: Player might have left during the yield
+			if not player.Parent then
+				return
+			end
+
+			if not root or not humanoid then
+				return
+			end
+
+			-- Use found components directly
+			playerCache[player] = {
+				Player = player,
+				Character = character,
+				RootPart = root,
+				Humanoid = humanoid,
+			}
+
+			-- Listen for death to clear cache entry
+			if humanoid then
+				humanoid.Died:Connect(function()
+					-- Race condition check: Ensure we are clearing the cache for the *current* character
+					if playerCache[player] and playerCache[player].Character == character then
+						playerCache[player] = nil
+					end
+				end)
+			end
+		end
+
+		player.CharacterAdded:Connect(onCharacterAdded)
+		player.CharacterRemoving:Connect(function(character)
+			if playerCache[player] and playerCache[player].Character == character then
+				playerCache[player] = nil
+			end
+		end)
+
+		-- Handle initial character if present
+		if player.Character then
+			task.spawn(function()
+				onCharacterAdded(player.Character)
+			end)
+		end
+	end
+
+	Players.PlayerAdded:Connect(setupPlayer)
+	for _, player in Players:GetPlayers() do
+		setupPlayer(player)
+	end
 
 	-- AI update loop
 	RunService.Heartbeat:Connect(function(deltaTime)
