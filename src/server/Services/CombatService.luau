@@ -49,6 +49,19 @@ local activeAttacks: { { id: string, expiry: number } } = {}
 -- Track combo state per player to prevent sequence exploits (e.g. skipping to attack 3)
 local playerComboState: { [Player]: { CurrentIndex: number, LastAttackTime: number } } = {}
 
+-- OPTIMIZATION: Cache active player characters to avoid O(N) array allocation on every AOE attack
+local cachedPlayerCharacters: { Model } = {}
+
+local function updateCachedCharacters()
+	local newCache = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			table.insert(newCache, p.Character)
+		end
+	end
+	cachedPlayerCharacters = newCache
+end
+
 --[[
     Get the root part of a target (works for players and NPCs)
 ]]
@@ -598,13 +611,8 @@ local function onRequestRangedHit(
 		local shredAmount = config.ShredAmount
 
 		local blastParams = OverlapParams.new()
-		local ignoreList = {}
-		for _, p in ipairs(Players:GetPlayers()) do
-			if p.Character then
-				table.insert(ignoreList, p.Character)
-			end
-		end
-		blastParams.FilterDescendantsInstances = ignoreList
+		blastParams.FilterType = Enum.RaycastFilterType.Exclude
+		blastParams.FilterDescendantsInstances = cachedPlayerCharacters
 
 		local blastParts = workspace:GetPartBoundsInRadius(hitPosition, hitRadius, blastParams)
 		local hitEnemies = {}
@@ -693,13 +701,8 @@ local function onRequestDashHit(player: Player, targetModel: Model?)
 		-- Distance tolerance for slide hits
 		if (rootPart.Position - targetRoot.Position).Magnitude <= 20 then
 			local blastParams = OverlapParams.new()
-			local ignoreList = {}
-			for _, p in ipairs(Players:GetPlayers()) do
-				if p.Character then
-					table.insert(ignoreList, p.Character)
-				end
-			end
-			blastParams.FilterDescendantsInstances = ignoreList
+			blastParams.FilterType = Enum.RaycastFilterType.Exclude
+			blastParams.FilterDescendantsInstances = cachedPlayerCharacters
 
 			local blastParts = workspace:GetPartBoundsInRadius(targetRoot.Position, config.AOERadius, blastParams)
 			local hitEnemies = {}
@@ -829,7 +832,19 @@ function CombatService:Start()
 		playerLastRangedAttack[player] = nil
 		playerLastAttackId[player] = nil
 		playerComboState[player] = nil
+		updateCachedCharacters()
 	end)
+
+	Players.PlayerAdded:Connect(function(player)
+		player.CharacterAdded:Connect(updateCachedCharacters)
+		player.CharacterRemoving:Connect(updateCachedCharacters)
+	end)
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		player.CharacterAdded:Connect(updateCachedCharacters)
+		player.CharacterRemoving:Connect(updateCachedCharacters)
+	end
+	updateCachedCharacters()
 
 	print("[CombatService] Started successfully")
 end

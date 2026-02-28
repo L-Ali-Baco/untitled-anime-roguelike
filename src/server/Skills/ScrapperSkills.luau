@@ -19,6 +19,30 @@ local ScrapperSkills = {}
 -- State tracking for Trip-Wires
 local activeTripWires = {}
 
+-- OPTIMIZATION: Cache active player characters to avoid O(N) array allocation on every AOE attack
+local cachedPlayerCharacters: { Model } = {}
+
+local function updateCachedCharacters()
+	local newCache = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			table.insert(newCache, p.Character)
+		end
+	end
+	cachedPlayerCharacters = newCache
+end
+
+Players.PlayerRemoving:Connect(updateCachedCharacters)
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(updateCachedCharacters)
+	player.CharacterRemoving:Connect(updateCachedCharacters)
+end)
+for _, player in ipairs(Players:GetPlayers()) do
+	player.CharacterAdded:Connect(updateCachedCharacters)
+	player.CharacterRemoving:Connect(updateCachedCharacters)
+end
+updateCachedCharacters()
+
 function ScrapperSkills.IsSpooling(player: Player): boolean
 	return activeTripWires[player] ~= nil
 end
@@ -153,13 +177,7 @@ function ScrapperSkills.TripWireSpool(player: Player, skillData: any, target: Mo
 		local connection
 		connection = RunService.Heartbeat:Connect(function()
 			-- Exclude players
-			local ignoreList = {}
-			for _, p in ipairs(Players:GetPlayers()) do
-				if p.Character then
-					table.insert(ignoreList, p.Character)
-				end
-			end
-			wireParams.FilterDescendantsInstances = ignoreList
+			wireParams.FilterDescendantsInstances = cachedPlayerCharacters
 
 			-- Detect intersections
 			local hitParts = workspace:GetPartBoundsInBox(wireVisual.CFrame, wireVisual.Size, wireParams)
@@ -273,7 +291,8 @@ function ScrapperSkills.TripWireSpool(player: Player, skillData: any, target: Mo
 					-- AOE Damage
 					local hitRadius = SkillConfig.Scrapper.Skill1.Radius
 					local blastParams = OverlapParams.new()
-					blastParams.FilterDescendantsInstances = ignoreList
+					blastParams.FilterType = Enum.RaycastFilterType.Exclude
+					blastParams.FilterDescendantsInstances = cachedPlayerCharacters
 					local blastParts = workspace:GetPartBoundsInRadius(explosionPos, hitRadius, blastParams)
 
 					local hitEnemies = {}
