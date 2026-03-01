@@ -33,17 +33,19 @@ return {
 			Cooldown = 3, -- Low cooldown — spammable poke/anti-air
 			AnimationId = "rbxassetid://101805537227722",
 			HitTime = 0.38, -- Animation impact frame (L→R)
-			Damage = 2.2, -- 220% base — slow bruiser, needs punch per use
+			Damage = 1.8, -- 180% base — poke tool; anti-air bonus makes it shine vs airborne
 			Range = 65, -- Max distance the wave travels (studs)
 			TravelSpeed = 90, -- Studs per second the wave moves forward
-			HitboxSize = Vector3.new(14, 22, 6), -- Tall box — catches flying enemies
+			HitboxSize = Vector3.new(14, 22, 12), -- Tall box — catches flying enemies; Z=12 ensures sweep overlap
 			HitboxOffset = Vector3.new(-2, 4, 0), -- Elevated centre (aerial bias)
 			Knockback = 22, -- Strong lateral knockback (sends them sideways)
 			Hitstop = 0.06,
 			ScreenShake = 0.5,
 			-- Flying enemy bonus
-			FlyingHeightThreshold = 3, -- Studs above player Y = "flying"
-			FlyingDamageMultiplier = 4.0, -- 4× vs airborne — Vanguard's dedicated anti-air
+			-- Threshold raised to 8: tall grounded enemies (Brutes) have their root at ~floor+7-9
+			-- and were falsely triggering the 4× multiplier. 8 studs requires genuine airtime.
+			FlyingHeightThreshold = 8, -- Studs above player Y = "flying"
+			FlyingDamageMultiplier = 2.2, -- 2.2× vs airborne — rewarding, not a one-shot nuke
 			VFXType = "AerialSlash", -- Key for AttackVFXConfig lookup
 		},
 		-- E: Pull — Iron Grip

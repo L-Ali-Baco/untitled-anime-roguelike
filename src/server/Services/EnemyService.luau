@@ -63,6 +63,8 @@ local lastStateSentTime: { [Model]: number } = {}
 
 -- Cached service references (populated in Start)
 local MovementServiceRef: any = nil
+local FlowFieldServiceRef: any = nil
+local EconomyServiceRef: any = nil
 
 -- ============================================================
 -- ENEMY CLASS REGISTRY
@@ -83,6 +85,9 @@ local ENEMY_CLASS_LOADERS: { [string]: () -> any } = {
 	end,
 	MossFrog = function()
 		return require(script.Parent.Parent.Enemies.MossFrog)
+	end,
+	Keg = function()
+		return require(script.Parent.Parent.Enemies.Keg)
 	end,
 }
 
@@ -177,6 +182,12 @@ local function buildServicesBag(): any
 			if enemy and MovementServiceRef then
 				MovementServiceRef:Unregister(enemy)
 			end
+			-- Notify EconomyService so it can spawn gold orbs at the death position.
+			-- Called before FireAllClients so the model is still in workspace and
+			-- GetBoundingBox() in EconomyService returns a valid position.
+			if EconomyServiceRef then
+				EconomyServiceRef:OnEnemyDied(payload)
+			end
 			local remote = Remotes:GetEvent("EnemyDied")
 			if remote then
 				remote:FireAllClients(payload)
@@ -204,6 +215,35 @@ local function buildServicesBag(): any
 		notifyAttackEnd = function(player: Player)
 			local current = attackerCounts[player] or 0
 			attackerCounts[player] = math.max(0, current - 1)
+		end,
+
+		-- ── Flow field navigation callbacks ─────────────────────────────────────
+		-- These are optional: if FlowFieldService hasn't baked yet or the
+		-- enemy is outside the grid, GetDirection returns Vector3.zero and
+		-- BaseEnemy:MoveTowardTarget falls back to direct targeting automatically.
+
+		-- Returns the flow-field unit direction from `pos` toward `player`.
+		-- O(1): four table lookups in the pre-computed BFS cost map.
+		getFlowDirection = function(pos: Vector3, player: Player): Vector3
+			if FlowFieldServiceRef then
+				return FlowFieldServiceRef:GetDirection(pos, player)
+			end
+			return Vector3.zero
+		end,
+
+		-- Returns true when the flow field for `player` is stale (player has moved
+		-- more than one cell width since the last BFS) or doesn't exist yet.
+		shouldRebuildFlow = function(player: Player, targetPos: Vector3): boolean
+			return FlowFieldServiceRef ~= nil and FlowFieldServiceRef:ShouldRebuild(player, targetPos)
+		end,
+
+		-- Triggers a BFS rebuild for `player` targeting `targetPos`.
+		-- Self-deduplicating: after the first call, ShouldRebuild returns false
+		-- for all other enemies in the same Heartbeat batch.
+		rebuildFlow = function(player: Player, targetPos: Vector3)
+			if FlowFieldServiceRef then
+				FlowFieldServiceRef:RebuildForPlayer(player, targetPos)
+			end
 		end,
 	}
 end
@@ -260,10 +300,7 @@ end
 -- ============================================================
 
 -- Apply Director difficulty multipliers to a config copy and set model attributes.
-function EnemyService:_applyDirectorScaling(
-	config: { [string]: any },
-	enemyModel: Model
-): { [string]: any }
+function EnemyService:_applyDirectorScaling(config: { [string]: any }, enemyModel: Model): { [string]: any }
 	local healthMult = 1.0
 	local speedMult = 1.0
 	local damageMult = 1.0
@@ -302,10 +339,12 @@ function EnemyService:_createPlaceholderModel(enemyType: string, position: Vecto
 		Brute = Color3.fromRGB(200, 50, 50),
 		Shooter = Color3.fromRGB(200, 200, 50),
 		MossFrog = Color3.fromRGB(60, 140, 60),
+		Keg = Color3.fromRGB(255, 120, 0), -- Bright orange — visually distinct bomber
 	}
 	local SIZE_MAP = {
 		Brute = Vector3.new(3, 3, 1.5),
 		MossFrog = Vector3.new(2.5, 1.5, 2.5),
+		Keg = Vector3.new(1.5, 1.5, 1.5), -- Small and compact
 	}
 
 	local model = Instance.new("Model")
@@ -377,11 +416,12 @@ function EnemyService:SpawnEnemy(enemyType: string, position: Vector3, parent: I
 
 	enemyModel.Parent = parent or workspace
 
-	-- Offset upward so the model doesn't spawn inside the floor
-	if enemyModel.PrimaryPart then
-		local _, size = enemyModel:GetBoundingBox()
-		enemyModel:PivotTo(CFrame.new(position + Vector3.new(0, size.Y / 2 + 1, 0)))
-	end
+	-- Always reposition to the requested spawn point.
+	-- PivotTo works with or without PrimaryPart (uses bounding-box centre as fallback),
+	-- so the old `if PrimaryPart` guard was wrong: asset models without PrimaryPart set
+	-- would silently stay at their ReplicatedStorage storage position.
+	local _, modelSize = enemyModel:GetBoundingBox()
+	enemyModel:PivotTo(CFrame.new(position + Vector3.new(0, modelSize.Y / 2 + 1, 0)))
 
 	-- Scale stats by current difficulty
 	local scaledConfig = self:_applyDirectorScaling(config, enemyModel)
@@ -470,7 +510,10 @@ end
 -- ============================================================
 
 local function setupDebugCommands()
-	Players.PlayerAdded:Connect(function(player)
+	-- Connect the chat handler for a single player.
+	-- Extracted so it can be called for players already in-game (Studio playtest)
+	-- as well as future joiners via PlayerAdded.
+	local function connectChatted(player: Player)
 		player.Chatted:Connect(function(msg: string)
 			local args = string.split(msg, " ")
 			local cmd = string.lower(args[1])
@@ -496,7 +539,13 @@ local function setupDebugCommands()
 				EnemyService:SpawnEnemy(resolvedType, spawnPos)
 			end
 		end)
-	end)
+	end
+
+	-- Hook players already present (e.g. developer in Studio playtest)
+	for _, player in Players:GetPlayers() do
+		connectChatted(player)
+	end
+	Players.PlayerAdded:Connect(connectChatted)
 end
 
 -- ============================================================
@@ -511,8 +560,10 @@ end
 function EnemyService:Start()
 	print("[EnemyService] Starting...")
 
-	-- Cache MovementService reference (already started by bootstrap)
+	-- Cache service references (already started by bootstrap)
 	MovementServiceRef = require(script.Parent.MovementService)
+	FlowFieldServiceRef = require(script.Parent.FlowFieldService)
+	EconomyServiceRef = require(script.Parent.EconomyService)
 
 	-- Build the services bag now so closures capture the live EnemyService
 	servicesBag = buildServicesBag()
@@ -541,9 +592,17 @@ function EnemyService:Start()
 		playerLastDash[player] = nil
 	end)
 
-	-- Scan workspace for manually placed enemy models at server start
+	-- Scan workspace for intentionally placed enemy models at server start.
+	-- Only registers models that have a ManualEnemy = true attribute explicitly set.
+	-- This prevents accidentally left-over test models from being picked up —
+	-- the debug /enemy command always spawns via SpawnEnemy() which creates a fresh model,
+	-- so workspace models are only for map-designers who want enemies pre-placed in the level.
 	for _, obj in workspace:GetDescendants() do
-		if obj:IsA("Model") and EnemyConfig.Types[obj.Name] and not activeEnemies[obj] then
+		if obj:IsA("Model")
+			and EnemyConfig.Types[obj.Name]
+			and not activeEnemies[obj]
+			and obj:GetAttribute("ManualEnemy") == true
+		then
 			self:RegisterEnemy(obj :: Model, obj.Name)
 		end
 	end
@@ -563,11 +622,7 @@ function EnemyService:Start()
 			-- Guard: model was destroyed outside normal death flow (e.g. /clear)
 			if not model.Parent then
 				-- Release attack token if this enemy was mid-attack when forcibly removed
-				if
-					enemy.State == "Attack"
-					or enemy.State == "LeapAttack"
-					or enemy.State == "ChargeAttack"
-				then
+				if enemy.State == "Attack" or enemy.State == "LeapAttack" or enemy.State == "ChargeAttack" then
 					if enemy.Target and typeof(enemy.Target) == "Instance" and enemy.Target:IsA("Player") then
 						attackerCounts[enemy.Target] = math.max(0, (attackerCounts[enemy.Target] or 0) - 1)
 					end

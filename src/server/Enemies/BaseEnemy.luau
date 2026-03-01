@@ -24,6 +24,19 @@ local EnemyConfig = require(Shared:WaitForChild("Config"):WaitForChild("EnemyCon
 local CombatConfig = require(Shared:WaitForChild("Config"):WaitForChild("CombatConfig"))
 local EnemyLib = require(Shared:WaitForChild("Lib"):WaitForChild("EnemyLib"))
 
+-- Lazy-loaded to avoid module load ordering issues (JumpController requires BaseEnemy for AIState).
+-- Populated on first use by enemies with Config.CanJump = true.
+local JumpController: any = nil
+local function getJumpController(): any
+	if not JumpController then
+		JumpController = require(script.Parent.JumpController)
+	end
+	return JumpController
+end
+
+-- Minimum seconds between ledge/gap probes per enemy (throttles raycast frequency).
+local JUMP_CHECK_INTERVAL = 0.35
+
 -- ============================================================
 -- EXPORTED CONSTANTS
 -- ============================================================
@@ -36,6 +49,10 @@ local AIState = {
 	ChargeAttack = "ChargeAttack",
 	Hitstun = "Hitstun",
 	Dead = "Dead",
+	-- Vertical movement states (requires Config.CanJump = true + animation IDs)
+	Jumping = "Jumping", -- airborne, rising after a ledge jump
+	Falling = "Falling", -- airborne, descending (gap leap or past jump apex)
+	Landing = "Landing", -- brief ground-recovery animation after touching down
 }
 
 -- Services bag type — injected at construction to avoid circular requires.
@@ -50,6 +67,10 @@ export type Services = {
 	canAttack: (player: Player) -> boolean,
 	notifyAttackStart: (player: Player) -> (),
 	notifyAttackEnd: (player: Player) -> (),
+	-- Flow field navigation (optional — falls back to direct targeting if nil)
+	getFlowDirection: ((pos: Vector3, player: Player) -> Vector3)?,
+	shouldRebuildFlow: ((player: Player, targetPos: Vector3) -> boolean)?,
+	rebuildFlow: ((player: Player, targetPos: Vector3) -> ())?,
 }
 
 -- ============================================================
@@ -110,6 +131,20 @@ function BaseEnemy.new(
 	self._tokenWaitStart = 0 :: number
 	-- Circling direction: +1 or -1, randomised per enemy
 	self._circleSign = if math.random() > 0.5 then 1 else -1
+
+	-- ── Vertical movement (Jumping / Falling / Landing) ───────────────────────
+	-- XZ velocity locked during airborne states so Separation can't deflect mid-arc.
+	self._jumpTrajectory = Vector2.zero
+	-- tick() expiry for the Falling grace period (don't check landing immediately).
+	self._fallingGraceEnd = 0
+	-- tick() expiry for the Landing recovery animation.
+	self._landRecoveryEnd = 0
+	-- Throttle: only run JumpController probes at JUMP_CHECK_INTERVAL Hz.
+	self._lastJumpCheckTime = 0
+	-- Animation tracks for airborne states (populated by _setupAnimator if config has IDs).
+	self.JumpTrack = nil :: AnimationTrack?
+	self.FallTrack = nil :: AnimationTrack?
+	self.LandTrack = nil :: AnimationTrack?
 
 	-- Movement state
 	self.IsMoving = false
@@ -256,6 +291,39 @@ function BaseEnemy:_setupAnimator()
 			warn(("[BaseEnemy] Walk animation failed for %s: %s"):format(self.EnemyType, result))
 		end
 	end
+
+	-- ── Vertical movement animations (loaded only if config provides IDs) ─────
+	-- Priority = Action so they override Walk/Idle which are Movement priority.
+	-- JumpAnim: Looped = false (one-shot rising arc).
+	-- FallAnim: Looped = true  (held until landing).
+	-- LandAnim: Looped = false (one-shot recovery impact).
+	local function _loadAnim(animId: string, looped: boolean): AnimationTrack?
+		if not animator then
+			return nil
+		end
+		local ok, result = pcall(function()
+			local anim = Instance.new("Animation")
+			anim.AnimationId = animId
+			local track = animator:LoadAnimation(anim)
+			track.Looped = looped
+			track.Priority = Enum.AnimationPriority.Action
+			return track
+		end)
+		if ok then
+			return result :: AnimationTrack
+		end
+		return nil
+	end
+
+	if self.Config.JumpAnimationId then
+		self.JumpTrack = _loadAnim(self.Config.JumpAnimationId, false)
+	end
+	if self.Config.FallAnimationId then
+		self.FallTrack = _loadAnim(self.Config.FallAnimationId, true)
+	end
+	if self.Config.LandAnimationId then
+		self.LandTrack = _loadAnim(self.Config.LandAnimationId, false)
+	end
 end
 
 function BaseEnemy:_registerAttributes()
@@ -338,6 +406,59 @@ function BaseEnemy:_onDeath()
 end
 
 -- ============================================================
+-- PRIVATE: LANDING
+-- ============================================================
+
+--[[
+	Called when the enemy touches the ground after Jumping or Falling.
+	Plays the LandAnim, locks movement for LandRecoveryTime, then returns to Chase.
+
+	LandRecoveryTime is defined per-enemy in EnemyConfig (e.g. 0.4s for Brute,
+	0s for light enemies). Heavy enemies stagger visibly; light ones snap back
+	to chase immediately.
+]]
+function BaseEnemy:_onLand()
+	if self._destroyed then
+		return
+	end
+
+	-- Zero out airborne velocity so the enemy doesn't slide on landing.
+	self._jumpTrajectory = Vector2.zero
+	if self.LinearVelocity then
+		self.LinearVelocity.PlaneVelocity = Vector2.zero
+	end
+
+	-- Stop any active airborne track.
+	if self.FallTrack and self.FallTrack.IsPlaying then
+		self.FallTrack:Stop(0.05)
+	end
+	if self.JumpTrack and self.JumpTrack.IsPlaying then
+		self.JumpTrack:Stop(0.05)
+	end
+
+	-- Play the one-shot landing impact animation.
+	if self.LandTrack then
+		self.LandTrack:Play(0.05)
+	end
+
+	local recoveryTime: number = self.Config.LandRecoveryTime or 0
+	self._landRecoveryEnd = tick() + recoveryTime
+
+	-- If there's no recovery time, go straight back to Chase.
+	if recoveryTime <= 0 then
+		self.State = AIState.Chase
+		if self.WalkTrack and not self.WalkTrack.IsPlaying then
+			self.WalkTrack:Play(0.2)
+		end
+		self._services.fireEnemyStateChanged(self.Model, AIState.Chase)
+	else
+		-- Enter brief Landing state for the recovery window.
+		self.State = AIState.Landing
+		self._services.fireEnemyStateChanged(self.Model, AIState.Landing)
+	end
+end
+
+-- ============================================================
 -- PUBLIC: MOVEMENT
 -- ============================================================
 
@@ -393,7 +514,28 @@ function BaseEnemy:MoveTowardTarget(targetPos: Vector3)
 	end
 
 	if needsNewMove and self.LinearVelocity then
+		-- ── Flow field navigation ─────────────────────────────────────────────
+		-- Prefer the flow field direction (obstacle-aware) when available.
+		-- Falls back to the direct vector if the flow field is missing or returns zero.
+		--
+		-- SELF-DEDUPLICATION: The first enemy that calls rebuildFlow() in a
+		-- given AI Heartbeat updates FlowFieldService.lastTargetPos. All
+		-- subsequent enemies asking ShouldRebuild() in the same batch see
+		-- false — one BFS per player-cell-change, regardless of enemy count.
 		local direction = Vector3.new(fullDiff.X, 0, fullDiff.Z)
+
+		if self._services.getFlowDirection and self.Target then
+			if self._services.shouldRebuildFlow and self._services.shouldRebuildFlow(self.Target, targetPos) then
+				if self._services.rebuildFlow then
+					self._services.rebuildFlow(self.Target, targetPos)
+				end
+			end
+			local flowDir = self._services.getFlowDirection(self.RootPart.Position, self.Target)
+			if flowDir.Magnitude > 0.1 then
+				direction = flowDir
+			end
+		end
+
 		if direction.Magnitude > 0.1 then
 			local speed: number = (self.Model:GetAttribute("WalkSpeed") :: number?) or 14
 			local dir2D = direction.Unit
@@ -616,10 +758,16 @@ function BaseEnemy:_doStandardAttack(attackData: { [string]: any }?)
 			return
 		end
 
-		local distToImpact = (targetRoot.Position - impactPos).Magnitude
+		-- Miss check: use direct enemy-to-player distance at the moment of impact.
+		-- This is more reliable than projecting an impactPos because Boids separation
+		-- or hitstun can drift the enemy sideways during the windup, making the
+		-- projected impactPos stale. The rule: if the enemy moved further than its
+		-- strike reach (forwardDist + AttackRange + a small grace buffer), the swing
+		-- missed. The impactPos is still used for VFX positioning above.
 		local distToEnemy = (targetRoot.Position - self.RootPart.Position).Magnitude
-		if distToImpact > hitRadius and distToEnemy > (config.AttackRange or 5) + 2 then
-			return -- Missed
+		local strikeReach = forwardDist + (config.AttackRange or 5) + 3
+		if distToEnemy > strikeReach then
+			return -- Missed: enemy drifted out of strike range during windup
 		end
 
 		local hum = character:FindFirstChildOfClass("Humanoid")
@@ -639,9 +787,17 @@ function BaseEnemy:_doStandardAttack(attackData: { [string]: any }?)
 		self._services.dealDamage(target, attackDamage, knockbackDir * 20)
 	end)
 
-	-- Return to Chase after full attack duration
+	-- Return to Chase after full attack duration.
+	-- IMPORTANT: notifyAttackEnd must be called HERE, not relied on in Tick's
+	-- state-transition block. The task.delay callback fires between Ticks, so
+	-- when Tick next runs oldState == Chase (already changed) and the
+	-- "wasAttacking → not attacking" branch is never reached — causing a
+	-- permanent token leak that blocks all further attacks after 2 total hits.
 	task.delay(attackDuration, function()
 		if self.State == AIState.Attack then
+			if self.Target then
+				self._services.notifyAttackEnd(self.Target)
+			end
 			self.State = AIState.Chase
 			self.CurrentAttack = nil
 			if self.WalkTrack and not self.WalkTrack.IsPlaying then
@@ -837,8 +993,39 @@ function BaseEnemy:Tick(_dt: number)
 				end
 			else
 				self._tokenWaitStart = 0
-				self:MoveTowardTarget(targetPos)
-				self:FaceToward(targetPos)
+
+				-- ── JumpController probe (throttled, opt-in via Config.CanJump) ──
+				-- Probes once per JUMP_CHECK_INTERVAL seconds. If a ledge or gap
+				-- is detected DoLedgeJump/DoGapLeap mutates State = Jumping/Falling
+				-- so MoveTowardTarget below is skipped this tick.
+				local jumpHandled = false
+				if config.CanJump and (now - self._lastJumpCheckTime) >= JUMP_CHECK_INTERVAL then
+					self._lastJumpCheckTime = now
+					local fullDiff = targetPos - self.RootPart.Position
+					local moveDir = Vector3.new(fullDiff.X, 0, fullDiff.Z)
+					if moveDir.Magnitude > 0.1 then
+						moveDir = moveDir.Unit
+						local jc = getJumpController()
+						-- Ledge: geometry at foot level but clear at chest → climbable.
+						local ledge = jc.CheckLedge(self, moveDir)
+						if ledge then
+							jc.DoLedgeJump(self, moveDir, ledge.jumpPower)
+							jumpHandled = true
+						else
+							-- Gap: no floor ahead, but safe ground below the drop.
+							local gap = jc.CheckGap(self, moveDir)
+							if gap then
+								jc.DoGapLeap(self, moveDir, gap.dropDepth)
+								jumpHandled = true
+							end
+						end
+					end
+				end
+
+				if not jumpHandled then
+					self:MoveTowardTarget(targetPos)
+					self:FaceToward(targetPos)
+				end
 			end
 		end
 
@@ -855,6 +1042,56 @@ function BaseEnemy:Tick(_dt: number)
 	-- ── LeapAttack / ChargeAttack ──────────────────────────────────────
 	-- These special states are driven by coroutines spawned in the subclass.
 	-- The base Tick does nothing here — the coroutine manages transitions.
+
+	-- ── Jumping ─────────────────────────────────────────────────────────
+	-- Enemy is airborne and rising (applied via AssemblyLinearVelocity.Y).
+	-- XZ is locked to _jumpTrajectory so Separation can't deflect mid-arc.
+	elseif self.State == AIState.Jumping then
+		if self.LinearVelocity and self._jumpTrajectory ~= Vector2.zero then
+			self.LinearVelocity.PlaneVelocity = self._jumpTrajectory
+		end
+		-- Transition to Falling once we're past the apex (Y velocity negative).
+		if self.RootPart.AssemblyLinearVelocity.Y < -1 then
+			self.State = AIState.Falling
+			self._fallingGraceEnd = now + 0.1
+			if self.JumpTrack and self.JumpTrack.IsPlaying then
+				self.JumpTrack:Stop(0.1)
+			end
+			if self.FallTrack then
+				self.FallTrack:Play(0.05)
+			end
+		end
+
+	-- ── Falling ──────────────────────────────────────────────────────────
+	-- Enemy is airborne and descending (gap leap or past jump apex).
+	-- XZ locked; check for landing after the grace period.
+	elseif self.State == AIState.Falling then
+		if self.LinearVelocity and self._jumpTrajectory ~= Vector2.zero then
+			self.LinearVelocity.PlaneVelocity = self._jumpTrajectory
+		end
+		if now >= self._fallingGraceEnd then
+			local jc = getJumpController()
+			if jc.IsGrounded(self) then
+				self:_onLand()
+			end
+		end
+
+	-- ── Landing ───────────────────────────────────────────────────────────
+	-- Brief recovery animation after touching down (LandRecoveryTime config).
+	-- Movement is locked. Transitions back to Chase when timer expires.
+	elseif self.State == AIState.Landing then
+		if self.LinearVelocity then
+			self.LinearVelocity.PlaneVelocity = Vector2.zero
+		end
+		if now >= self._landRecoveryEnd then
+			self.State = AIState.Chase
+			if self.LandTrack and self.LandTrack.IsPlaying then
+				self.LandTrack:Stop(0.2)
+			end
+			if self.WalkTrack and not self.WalkTrack.IsPlaying then
+				self.WalkTrack:Play(0.2)
+			end
+		end
 
 	end
 

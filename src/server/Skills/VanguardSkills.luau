@@ -64,7 +64,7 @@ function VanguardSkills.AerialSlash(player: Player, skillData: any, targetPos: V
 	local knockback = skillData.Knockback or 22
 	local flyingThresh = skillData.FlyingHeightThreshold or 3
 	local flyingMult = skillData.FlyingDamageMultiplier or 3.0
-	local stepTime = 0.05
+	local stepTime = 0.03 -- Reduced from 0.05: step = 2.7 studs, ensures overlap with hitbox depth
 
 	-- AUTO-TARGET: Use the client-provided locked target position if available,
 	-- otherwise fall back to looking forward

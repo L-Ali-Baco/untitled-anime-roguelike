@@ -29,6 +29,10 @@ return {
             Behavior: Chase player, simple melee attack
         ]]
 		Minion = {
+			-- Spawn weighting (relative). Higher = spawns more often.
+			-- Total active weight: Minion(60) + Shooter(15) + MossFrog(15) + Brute(7) + Keg(3) = 100
+			SpawnWeight = 60,
+
 			-- Stats
 			Health = 30,
 			WalkSpeed = 14, -- Slower than player (18)
@@ -64,6 +68,9 @@ return {
             Behavior: Chase player, heavy melee attack
         ]]
 		Brute = {
+			-- Rare heavy. High XP/loot reward justifies the danger.
+			SpawnWeight = 7,
+
 			Health = 100,
 			WalkSpeed = 6, -- Much slower (was 10)
 			Damage = 15,
@@ -149,6 +156,9 @@ return {
             Behavior: Chase, lunge when close, leap when mid-range
         ]]
 		MossFrog = {
+			-- Mid-tier. Equal weight to Shooter for balanced ranged/melee mix.
+			SpawnWeight = 15,
+
 			Health = 50,
 			WalkSpeed = 16, -- Nimble: faster than Brute, slightly slower than Minion
 
@@ -239,6 +249,9 @@ return {
             Behavior: Keep distance, shoot at player
         ]]
 		Shooter = {
+			-- Mid-tier ranged harasser.
+			SpawnWeight = 15,
+
 			Health = 20,
 			WalkSpeed = 12,
 			Damage = 8,
@@ -265,6 +278,146 @@ return {
 
 			HealthBarOffset = Vector3.new(0, 3, 0),
 			NameDisplayed = false,
+		},
+
+		--[[
+            Keg (Rolling Bomber)
+            Design: Disposable suicide runner. Forces the player to react with a dash.
+            AI logic (implement in Enemies/Keg.luau):
+              1. State machine: Chase → Arming → Explode (no melee attack state at all).
+              2. Chase at high speed until within ArmRange studs of any player.
+              3. Enter Arming: freeze movement, play a rapid flash VFX + audio for ArmDuration seconds.
+              4. Explode: AoE damage within ExplosionRadius. Kill self unconditionally.
+              5. If the player dashes out of ExplosionRadius during Arming, the bomb still explodes
+                 (punishes reactive players who are too slow, rewards those who pre-dash).
+              SpawnWeight is live. Requires Enemies/Keg.luau + entry in EnemyService ENEMY_CLASS_LOADERS.
+        ]]
+		Keg = {
+			SpawnWeight = 3, -- Rare treat, not common fodder
+
+			Health = 15, -- Glass cannon — one or two hits should kill it before it arms
+			WalkSpeed = 28, -- Faster than the player; closing the gap is its only job
+			Damage = 0, -- No melee. All damage comes from the explosion.
+
+			AggroRange = 80,
+			AttackRange = 0, -- Unused; replaced by ArmRange below
+			AttackCooldown = 0, -- Unused
+			AttackWindup = 0, -- Unused
+			AttackDuration = 0, -- Unused
+
+			-- Keg-specific
+			ArmRange = 5, -- Studs from target before it starts the countdown
+			ArmDuration = 1.2, -- Seconds of flashing before detonation (dash window)
+			ExplosionRadius = 12, -- AoE blast radius on detonation
+			ExplosionDamage = 40, -- High burst to punish players who ignore it
+			ExplosionVFXType = "Explosion",
+
+			ChaseSpeedMultiplier = 1.0,
+			StopDistanceFromTarget = 0, -- Runs INTO the player
+
+			HitstunDuration = 0.15, -- Can be briefly interrupted but will still explode
+			KnockbackResistance = 0,
+
+			XPValue = 8,
+			DropChance = 0.05, -- Barely worth looting — the threat IS the reward
+
+			HealthBarOffset = Vector3.new(0, 3, 0),
+			NameDisplayed = false,
+		},
+
+		--[[
+            Drone (Flying Harasser) — PLACEHOLDER (no AI class yet)
+            Design: Aerial threat that forces vertical awareness and target prioritisation.
+            AI logic (implement in Enemies/Drone.luau):
+              1. Ignore ground pathfinding entirely. Move directly via CFrame translation.
+              2. Maintain HoverHeight studs above the nearest ground surface below the target.
+              3. Keep PreferredDistance horizontally; strafe in a slow arc around the player.
+              4. Fire a fast, weak projectile at the player every FireCooldown seconds.
+              5. Cannot be hit by ground-level AoE that doesn't have height reach (design note for VFX team).
+              6. Low KnockbackResistance: a single upward hit should visibly stagger it.
+              SpawnWeight = 0 until implementation is complete.
+        ]]
+		Drone = {
+			SpawnWeight = 0, -- Disabled until Enemies/Drone.luau is written
+
+			Health = 25,
+			WalkSpeed = 14, -- Lateral hover speed
+			Damage = 6, -- Per projectile — low individual damage, high sustained fire
+
+			AggroRange = 95, -- Spots players from very far (elevated vantage)
+			AttackRange = 35, -- Opens fire from a comfortable hovering distance
+			AttackCooldown = 0, -- Unused; replaced by FireCooldown below
+			AttackWindup = 0.2,
+			AttackDuration = 0.3,
+
+			-- Drone-specific
+			HoverHeight = 18, -- Studs above the ground surface beneath the target
+			PreferredDistance = 25, -- Horizontal distance to maintain while strafing
+			FireCooldown = 1.5, -- Seconds between projectile bursts
+			ProjectileSpeed = 65, -- Fast bolts to punish slow reaction
+			ProjectileDamage = 6,
+			StrafeSpeed = 5, -- Studs/sec of lateral arc movement
+
+			ChaseSpeedMultiplier = 1.1,
+			StopDistanceFromTarget = 20,
+
+			HitstunDuration = 0.5, -- Easily interrupted mid-fire
+			KnockbackResistance = 0,
+
+			XPValue = 12,
+			DropChance = 0.15,
+
+			HealthBarOffset = Vector3.new(0, 4, 0),
+			NameDisplayed = false,
+		},
+
+		--[[
+            Shaman (Backline Buffer) — PLACEHOLDER (no AI class yet)
+            Design: High-priority assassination target. It doesn't fight the player;
+                    it makes every other enemy around it dangerous.
+            AI logic (implement in Enemies/Shaman.luau):
+              1. Does NOT target players. Instead, targets the centroid of nearby allies.
+              2. Pathfinds to stay behind the ally cluster (MaxDistFromAllies from centroid).
+              3. Every AuraCooldown seconds, choose one of two buffs at random:
+                 a) HealAura: heals all enemies within AuraRadius for HealAmount HP.
+                 b) SpeedAura: grants a 1.5x speed boost to allies within AuraRadius for AuraDuration.
+              4. Never initiates combat. Attempts to flee if a player enters FleeRange.
+              5. Visual cue: a persistent glow ring beneath it so players can identify it in a horde.
+              SpawnWeight = 0 until implementation is complete.
+        ]]
+		Shaman = {
+			SpawnWeight = 0, -- Disabled until Enemies/Shaman.luau is written
+
+			Health = 45, -- Squishy for a support — should die in 2-3 focused hits
+			WalkSpeed = 8, -- Slow backline mover
+			Damage = 0, -- Never attacks the player directly
+
+			AggroRange = 0, -- Shaman does not chase players
+			AttackRange = 0, -- Unused
+			AttackCooldown = 0, -- Unused
+			AttackWindup = 0, -- Unused
+			AttackDuration = 0, -- Unused
+
+			-- Shaman-specific
+			AuraRadius = 18, -- Studs; allies within this receive buffs
+			AuraCooldown = 8, -- Seconds between buff casts
+			HealAmount = 15, -- HP restored per heal pulse
+			BuffDuration = 4, -- Seconds the speed aura lasts
+			SpeedBuffMultiplier = 1.5, -- Allies move 50% faster during aura
+			MaxDistFromAllies = 20, -- Tries to stay within this range of ally centroid
+			FleeRange = 12, -- If a player gets this close, Shaman tries to reposition
+
+			ChaseSpeedMultiplier = 0, -- Never chases
+			StopDistanceFromTarget = 99, -- Effectively never stops to fight
+
+			HitstunDuration = 0.6, -- Soft target — easy to interrupt mid-cast
+			KnockbackResistance = 0,
+
+			XPValue = 25, -- High reward for the effort of assassinating it
+			DropChance = 0.30, -- Reliable drop to reward target prioritisation
+
+			HealthBarOffset = Vector3.new(0, 6, 0),
+			NameDisplayed = true, -- Always shown so players know to prioritise it
 		},
 	},
 

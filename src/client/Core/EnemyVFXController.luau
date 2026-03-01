@@ -26,6 +26,8 @@ EnemyVFXController.Name = "EnemyVFXController"
 local DamageNumbers = nil
 local ScreenShakeController = nil
 local AttackVFXPlayer = nil
+local ExplosionVFX = nil
+local LightningVFX = nil
 
 -- Connections
 local connections: { RBXScriptConnection } = {}
@@ -91,6 +93,12 @@ local function onEnemyAttack(data)
 	local hitPosition = data.HitPosition
 	local damage = data.Damage
 	local attackType = data.AttackType
+
+	-- Custom explosion VFX
+	if attackType == "Explosion" and ExplosionVFX and hitPosition then
+		ExplosionVFX:Play(hitPosition, data.AoERadius)
+		return -- Skip standard attack telegraph for explosions since the arming flash handled it
+	end
 
 	-- Attack-specific VFX via the player module
 	if hitPosition and AttackVFXPlayer then
@@ -309,6 +317,72 @@ local function onEnemyStateChanged(enemyModel: Model, newState: string)
 
 	if newState == "Hitstun" then
 		EnemyVFXController:PlayHitstun(enemyModel)
+
+	elseif newState == "Jumping" then
+		-- Small dust kick-off at the enemy's feet.
+		local attachment = Instance.new("Attachment")
+		attachment.WorldPosition = rootPart.Position + Vector3.new(0, -1, 0)
+		attachment.Parent = workspace.Terrain
+		local kickDust = Instance.new("ParticleEmitter")
+		kickDust.Color = ColorSequence.new(Color3.fromRGB(160, 140, 110))
+		kickDust.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.8),
+			NumberSequenceKeypoint.new(0.5, 1.4),
+			NumberSequenceKeypoint.new(1, 0),
+		})
+		kickDust.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.3),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		kickDust.Lifetime = NumberRange.new(0.25, 0.45)
+		kickDust.Speed = NumberRange.new(4, 10)
+		kickDust.SpreadAngle = Vector2.new(80, 80)
+		kickDust.Drag = 5
+		kickDust.Rate = 0
+		kickDust.Parent = attachment
+		kickDust:Emit(8)
+		Debris:AddItem(attachment, 0.6)
+
+	elseif newState == "Landing" then
+		-- Landing impact: larger dust burst + brief screen shake scaled by enemy mass.
+		local attachment = Instance.new("Attachment")
+		attachment.WorldPosition = rootPart.Position + Vector3.new(0, -1.5, 0)
+		attachment.Parent = workspace.Terrain
+
+		local landDust = Instance.new("ParticleEmitter")
+		landDust.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 155, 115)),
+			ColorSequenceKeypoint.new(0.6, Color3.fromRGB(130, 110, 85)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(90, 75, 55)),
+		})
+		landDust.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1.2),
+			NumberSequenceKeypoint.new(0.4, 3.5),
+			NumberSequenceKeypoint.new(1, 0),
+		})
+		landDust.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.1),
+			NumberSequenceKeypoint.new(0.5, 0.5),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		landDust.Lifetime = NumberRange.new(0.4, 0.9)
+		landDust.Speed = NumberRange.new(6, 18)
+		landDust.SpreadAngle = Vector2.new(180, 20) -- flat radial burst
+		landDust.Drag = 6
+		landDust.Rate = 0
+		landDust.Parent = attachment
+		landDust:Emit(20)
+		Debris:AddItem(attachment, 1.2)
+
+		-- Screen shake: heavier enemies create a stronger thump.
+		-- EnemyType attribute is set by BaseEnemy._registerAttributes().
+		if ScreenShakeController then
+			local enemyType = enemyModel:GetAttribute("EnemyType") or ""
+			local intensity = if enemyType == "Brute" then 0.35
+				elseif enemyType == "MossFrog" then 0.18
+				else 0.12
+			ScreenShakeController:Shake(intensity, 0.12)
+		end
 	end
 end
 
@@ -451,10 +525,15 @@ function EnemyVFXController:Init()
 	DamageNumbers = tryRequire(script.Parent.Parent.VFX.DamageNumbers)
 	ScreenShakeController = tryRequire(script.Parent.Parent.VFX.ScreenShakeController)
 	AttackVFXPlayer = tryRequire(script.Parent.Parent.VFX.AttackVFXPlayer)
+	ExplosionVFX = tryRequire(script.Parent.Parent.VFX.ExplosionVFX)
+	LightningVFX = tryRequire(script.Parent.Parent.VFX.LightningVFX)
 
 	-- Pass screen shake controller to the attack VFX player
 	if AttackVFXPlayer then
 		AttackVFXPlayer:Init(ScreenShakeController)
+	end
+	if ExplosionVFX then
+		ExplosionVFX:Init(ScreenShakeController)
 	end
 
 	print("[EnemyVFXController] Initialized")
@@ -488,6 +567,23 @@ function EnemyVFXController:Start()
 	local stateRemote = Remotes:GetEvent("EnemyStateChanged")
 	if stateRemote then
 		table.insert(connections, stateRemote.OnClientEvent:Connect(onEnemyStateChanged))
+	end
+
+	-- Chain lightning VFX: fired by ProcService when StaticFilament proc triggers.
+	-- Payload: bounces = {{From: Vector3, To: Vector3}}, isCrit = boolean
+	local chainLightningRemote = Remotes:GetEvent("ChainLightningVFX")
+	if chainLightningRemote then
+		table.insert(
+			connections,
+			chainLightningRemote.OnClientEvent:Connect(function(
+				bounces: { { From: Vector3, To: Vector3 } },
+				isCrit: boolean
+			)
+				if LightningVFX then
+					LightningVFX:PlayChain(bounces, isCrit)
+				end
+			end)
+		)
 	end
 
 	-- Listen for player health changes to show damage numbers on actual hits

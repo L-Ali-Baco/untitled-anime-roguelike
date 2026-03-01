@@ -58,13 +58,18 @@ end
     Stacking increases chain targets (more enemies hit), not raw damage.
     At 50 stacks without diminishing returns: 50×0.4 = 20× base damage per zap.
     With this formula: approaches 2.0× as a hard cap.
+
+    VFX: fires "ChainLightningVFX" to all clients with a flat array of bounce
+    segments ({From, To} pairs). Clients render pooled LightningBeam arcs in a
+    cascade. isCrit is forwarded so clients can use the gold palette.
 ]]
 local function triggerChainLightning(
 	attacker: Player,
 	primaryTarget: Model,
 	procData: any,
 	stackCount: number,
-	inventory: { [string]: number }?
+	inventory: { [string]: number }?,
+	isCrit: boolean?
 )
 	-- Diminishing returns: base=0.4, hard cap=2.0 (5× the single-stack value)
 	local damageMult = MathUtil.HyperbolicScale(stackCount, procData.Damage, 2.0)
@@ -76,15 +81,37 @@ local function triggerChainLightning(
 	local maxChain = math.min(3 + (stackCount - 1), 10) -- caps at 10 chains
 	local enemies = CombatLib.getEnemiesInRadius(primaryTarget:GetPivot().Position, radius, { primaryTarget })
 
+	-- ── Build bounce segment list for VFX ──────────────────────────────────
+	-- Each segment is a {From, To} pair representing one lightning arc.
+	-- We walk from the primary target outward through the chain.
+	-- Collected before the damage loop so positions reflect pre-death locations.
+	local bounces: { { From: Vector3, To: Vector3 } } = {}
+	local prevPos: Vector3 = primaryTarget:GetPivot().Position
+
 	local chainCount = 0
 	for _, enemy in enemies do
 		if chainCount >= maxChain then
 			break
 		end
+
+		local enemyPos = enemy:GetPivot().Position
+
+		-- Record the arc segment: previous target → this target.
+		table.insert(bounces, { From = prevPos, To = enemyPos })
+		prevPos = enemyPos
+
 		-- Bypasses CombatService intentionally: proc damage must not re-trigger procs.
 		EnemyLib:TakeDamage(enemy, baseDamage * damageMult)
 		chainCount += 1
-		-- TODO: Fire remote for lightning VFX
+	end
+
+	-- ── Fire VFX remote to all clients ────────────────────────────────────
+	-- Only fire if there were actual bounces to display.
+	if chainCount > 0 then
+		local vfxRemote = Remotes:GetEvent("ChainLightningVFX")
+		if vfxRemote then
+			vfxRemote:FireAllClients(bounces, isCrit == true)
+		end
 	end
 end
 
@@ -141,7 +168,7 @@ function ProcService:ProcessHit(attacker: Player, target: Model, damageDealt: nu
 						-- Roll chance
 						if math.random() <= proc.Chance then
 							if proc.Id == "ChainLightning" then
-								triggerChainLightning(attacker, target, proc, count, inventory)
+								triggerChainLightning(attacker, target, proc, count, inventory, isCrit)
 							elseif proc.Id == "Vacuum" then
 								-- triggerVacuum(...)
 							end

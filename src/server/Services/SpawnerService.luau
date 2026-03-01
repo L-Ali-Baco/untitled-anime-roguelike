@@ -32,6 +32,70 @@ local spawningEnabled = true -- toggled by /nospawn and /spawn commands
 local updateAccumulator = 0
 local SPAWN_CHECK_INTERVAL = 2.0 -- Check for spawns every 2 seconds
 
+-- Weighted spawn pool, built once in Start() from EnemyConfig.Types[*].SpawnWeight.
+-- Each entry: { Name: string, Cumulative: number } sorted ascending by cumulative weight.
+-- A uniform random roll [0, totalSpawnWeight) selects the first entry whose cumulative
+-- value exceeds the roll — identical to the LootManager tier algorithm.
+local weightedSpawnPool: { { Name: string, Cumulative: number } } = {}
+local totalSpawnWeight = 0
+
+--[[
+    Read SpawnWeight from every enemy type and compile the cumulative lookup table.
+    Call once in Start() after EnemyConfig is guaranteed loaded.
+    Types with SpawnWeight = 0 (placeholder archetypes) are silently excluded.
+]]
+local function buildSpawnPool()
+	weightedSpawnPool = {}
+	totalSpawnWeight = 0
+
+	-- Collect eligible types; sort by name for deterministic iteration order
+	-- (generic Luau table iteration has no guaranteed order).
+	local entries: { { Name: string, Weight: number } } = {}
+	for typeName, typeData in EnemyConfig.Types do
+		local w = typeData.SpawnWeight
+		if type(w) == "number" and w > 0 then
+			table.insert(entries, { Name = typeName, Weight = w })
+		end
+	end
+	table.sort(entries, function(a, b)
+		return a.Name < b.Name
+	end)
+
+	local cumulative = 0
+	for _, entry in entries do
+		cumulative += entry.Weight
+		table.insert(weightedSpawnPool, { Name = entry.Name, Cumulative = cumulative })
+	end
+	totalSpawnWeight = cumulative
+
+	-- Log the resolved distribution for easy tuning visibility in the output window
+	print("[SpawnerService] Spawn pool built —", #weightedSpawnPool, "types, total weight:", totalSpawnWeight)
+	local prevCumulative = 0
+	for _, entry in weightedSpawnPool do
+		local weight = entry.Cumulative - prevCumulative
+		local pct = math.round(weight / totalSpawnWeight * 100)
+		print(string.format("  %-12s %3d%%  (weight %d)", entry.Name, pct, weight))
+		prevCumulative = entry.Cumulative
+	end
+end
+
+--[[
+    Weighted random enemy type selection.
+    O(n) linear scan over the cumulative table — pool size is tiny (<10 types).
+]]
+local function pickWeightedEnemyType(): string
+	if totalSpawnWeight == 0 or #weightedSpawnPool == 0 then
+		return "Minion" -- safe fallback if config is empty
+	end
+	local roll = math.random() * totalSpawnWeight
+	for _, entry in weightedSpawnPool do
+		if roll < entry.Cumulative then
+			return entry.Name
+		end
+	end
+	return weightedSpawnPool[#weightedSpawnPool].Name -- floating-point safety net
+end
+
 --[[
     Sync spawn points from MapService
 ]]
@@ -109,14 +173,6 @@ local function isInRange(position: Vector3): boolean
 end
 
 --[[
-    Pick a random enemy type based on simple weights
-]]
-local function getRandomEnemyType(): string
-	local types = { "Minion", "Minion", "Minion", "Brute", "Brute", "Shooter", "MossFrog" } -- ~43% Minion, 29% Brute, 14% Shooter, 14% MossFrog
-	return types[math.random(#types)]
-end
-
---[[
     Attempt to spawn an enemy at a specific point
 ]]
 local function attemptSpawn(point: Instance)
@@ -141,7 +197,7 @@ local function attemptSpawn(point: Instance)
 		end
 
 		-- Spawn!
-		local enemyType = getRandomEnemyType()
+		local enemyType = pickWeightedEnemyType()
 		local success = EnemyService:SpawnEnemy(enemyType, pos + Vector3.new(0, 3, 0))
 
 		if success then
@@ -195,6 +251,9 @@ end
     Start the service
 ]]
 function SpawnerService:Start()
+	-- Build weighted pool from config before any spawns occur
+	buildSpawnPool()
+
 	-- Initial setup
 	refreshSpawnPoints()
 	-- MapService handles map loading, we just read from it

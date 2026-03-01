@@ -182,7 +182,9 @@ end
 -- ============================================================
 
 function Brute:_doLeapAttack(attackData: { [string]: any })
-	if not self.Target then
+	-- Capture target before nil checks so notifyAttackEnd can always reference it.
+	local target = self.Target
+	if not target then
 		self.State = AIState.Chase
 		return
 	end
@@ -191,8 +193,6 @@ function Brute:_doLeapAttack(attackData: { [string]: any })
 	if not rootPart or not rootPart.Parent then
 		return
 	end
-
-	local target = self.Target
 	local windupDuration: number = attackData.WindupDuration or 1.2
 	local launchDuration: number = attackData.LaunchDuration or 0.5
 	local flightDuration: number = attackData.FlightDuration or 0.6
@@ -298,6 +298,9 @@ function Brute:_doLeapAttack(attackData: { [string]: any })
 			midairTrack:Stop()
 		end
 		rootPart.Anchored = wasAnchored
+		if target then
+			self._services.notifyAttackEnd(target)
+		end
 		self.State = AIState.Chase
 		return
 	end
@@ -390,9 +393,15 @@ function Brute:_doLeapAttack(attackData: { [string]: any })
 		self._services.dealDamage(player, attackDamage, knockbackDir * 35)
 	end
 
-	-- Recovery, then return to Chase
+	-- Recovery, then return to Chase.
+	-- Same token-leak fix as _doStandardAttack: notifyAttackEnd must be called
+	-- here because the state change happens outside Tick and the transition
+	-- block never sees LeapAttack → Chase.
 	task.delay(landDuration, function()
 		if self.State == AIState.LeapAttack then
+			if target then
+				self._services.notifyAttackEnd(target)
+			end
 			self.State = AIState.Chase
 			self.CurrentAttack = nil
 			if self.WalkTrack and not self.WalkTrack.IsPlaying then
@@ -416,6 +425,7 @@ function Brute:_doChargeAttack(attackData: { [string]: any })
 		return
 	end
 
+	-- Capture before any nil checks (same token-leak fix pattern as _doLeapAttack).
 	local target = self.Target
 	local windup: number = attackData.Windup or 0.25
 	local chargeDuration: number = attackData.Duration or 0.75
@@ -444,6 +454,9 @@ function Brute:_doChargeAttack(attackData: { [string]: any })
 	-- Lock direction at launch moment so Brute can't steer mid-charge
 	local targetPos = self:_getTargetPosition()
 	if not targetPos then
+		if target then
+			self._services.notifyAttackEnd(target)
+		end
 		self.State = AIState.Chase
 		return
 	end
@@ -451,6 +464,9 @@ function Brute:_doChargeAttack(attackData: { [string]: any })
 	local diff = targetPos - rootPart.Position
 	local direction = Vector3.new(diff.X, 0, diff.Z)
 	if direction.Magnitude < 0.1 then
+		if target then
+			self._services.notifyAttackEnd(target)
+		end
 		self.State = AIState.Chase
 		return
 	end
@@ -522,9 +538,14 @@ function Brute:_doChargeAttack(attackData: { [string]: any })
 		self._services.dealDamage(player, damage, direction * 35 + Vector3.new(0, 12, 0))
 	end
 
-	-- Brief recovery, then Chase
+	-- Brief recovery, then Chase.
+	-- notifyAttackEnd called here for the same token-leak reason as
+	-- _doStandardAttack and _doLeapAttack.
 	task.delay(0.3, function()
 		if self.State == AIState.ChargeAttack then
+			if target then
+				self._services.notifyAttackEnd(target)
+			end
 			self.State = AIState.Chase
 			self.CurrentAttack = nil
 			if self.WalkTrack and not self.WalkTrack.IsPlaying then
