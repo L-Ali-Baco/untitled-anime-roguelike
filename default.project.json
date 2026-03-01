@@ -23,6 +23,9 @@
         "Client": {
           "$path": "src/client"
         }
+      },
+      "StarterCharacterScripts": {
+        "$path": "src/startercharacter"
       }
     },
 
@@ -30,46 +33,6 @@
       "$properties": {
         "FilteringEnabled": true,
         "StreamingEnabled": true
-      },
-      "Baseplate": {
-        "$className": "Part",
-        "$properties": {
-          "Anchored": true,
-          "Color": [
-            0.38823,
-            0.37254,
-            0.38823
-          ],
-          "Locked": true,
-          "Position": [
-            0,
-            -10,
-            0
-          ],
-          "Size": [
-            512,
-            20,
-            512
-          ]
-        }
-      },
-      "SpawnLocation": {
-        "$className": "SpawnLocation",
-        "$properties": {
-          "Anchored": true,
-          "Position": [
-            0,
-            1,
-            0
-          ],
-          "Size": [
-            6,
-            1,
-            6
-          ],
-          "Neutral": true,
-          "AllowTeamChangeOnTouch": false
-        }
       },
       "TrainingDummy": {
         "$className": "Model",

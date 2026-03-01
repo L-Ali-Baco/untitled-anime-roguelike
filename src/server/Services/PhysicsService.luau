@@ -59,6 +59,12 @@ function PhysicsManager:Init()
 	-- 3. Players and Enemies collide normally
 	PhysicsService:CollisionGroupSetCollidable(GROUPS.Players, GROUPS.Enemies, true)
 
+	-- 4. Enemies do NOT collide with each other.
+	--    At 50+ enemies this eliminates hundreds of physics manifold
+	--    solves per frame. Mathematical boids separation (EnemyService)
+	--    handles spacing instead — zero physics overhead.
+	PhysicsService:CollisionGroupSetCollidable(GROUPS.Enemies, GROUPS.Enemies, false)
+
 	print("[PhysicsService] Collision groups initialized")
 end
 

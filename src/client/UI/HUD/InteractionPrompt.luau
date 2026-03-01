@@ -42,7 +42,7 @@ function InteractionPrompt.new(): () -> ()
 	end)
 
 	ProximityPromptService.PromptHidden:Connect(function(prompt)
-		if currentPrompt:get() == prompt then
+		if Fusion.peek(currentPrompt) == prompt then
 			isVisible:set(false)
 			currentPrompt:set(nil)
 		end
@@ -122,7 +122,7 @@ function InteractionPrompt.new(): () -> ()
 						BackgroundTransparency = 1,
 						Text = "",
 						[OnEvent("Activated")] = function()
-							local prompt = currentPrompt:get()
+							local prompt = Fusion.peek(currentPrompt)
 							if prompt then
 								prompt:InputHoldBegin()
 								task.wait(prompt.HoldDuration + 0.1)
@@ -138,21 +138,11 @@ function InteractionPrompt.new(): () -> ()
 	-- Hide Roblox's default UI
 	ProximityPromptService.Enabled = true
 
-	-- Custom Prompt Override
-	local function onPromptAdded(prompt: ProximityPrompt)
-		prompt.Style = Enum.ProximityPromptStyle.Custom
-	end
-
-	for _, prompt in pairs(game:GetService("CollectionService"):GetTagged("LootChest")) do
-		-- Handle already existing if needed
-	end
-
-	-- Connect to future prompts
-	local conn = game:GetService("RunService").Heartbeat:Connect(function()
-		for _, prompt in pairs(game:GetDescendants()) do
-			if prompt:IsA("ProximityPrompt") and prompt.Style ~= Enum.ProximityPromptStyle.Custom then
-				prompt.Style = Enum.ProximityPromptStyle.Custom
-			end
+	-- Force Custom style on any prompt that becomes visible, as a safety net
+	-- (Server sets Style=Custom when creating prompts, this catches edge cases)
+	local conn = ProximityPromptService.PromptShown:Connect(function(prompt)
+		if prompt.Style ~= Enum.ProximityPromptStyle.Custom then
+			prompt.Style = Enum.ProximityPromptStyle.Custom
 		end
 	end)
 

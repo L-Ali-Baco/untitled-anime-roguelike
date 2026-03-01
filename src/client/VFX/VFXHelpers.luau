@@ -202,8 +202,17 @@ function VFXHelpers.getEnemyDirections(enemyModel: Model?): (BasePart?, Vector3,
 	end
 
 	if root then
-		forward = root.CFrame.LookVector
-		right = root.CFrame.RightVector
+		-- The root part's CFrame already has FacingOffset baked in by AlignOrientation.
+		-- Undo the offset to recover the true visual-forward and visual-right vectors.
+		local facingOffset = (enemyModel and enemyModel:GetAttribute("FacingOffset")) or 0
+		if facingOffset ~= 0 then
+			local corrected = root.CFrame * CFrame.Angles(0, math.rad(-facingOffset), 0)
+			forward = corrected.LookVector
+			right = corrected.RightVector
+		else
+			forward = root.CFrame.LookVector
+			right = root.CFrame.RightVector
+		end
 	end
 
 	return root, forward, right

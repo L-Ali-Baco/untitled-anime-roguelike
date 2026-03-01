@@ -124,34 +124,37 @@ local function onRenderStepped(deltaTime: number)
 	local lookDelta = InputController:GetLookDelta()
 	local device = InputController:GetDevice()
 
-	-- Get sensitivity based on device
-	local sensitivity = CameraConfig.PC.Sensitivity
-	if device == "Mobile" then
-		sensitivity = CameraConfig.Mobile.Sensitivity
-	elseif device == "Gamepad" then
-		sensitivity = CameraConfig.Gamepad.Sensitivity
+	-- Only rotate when gameplay input is active (stops camera spinning during UI screens)
+	if not InputController:IsInputBlocked() then
+		-- Get sensitivity based on device
+		local sensitivity = CameraConfig.PC.Sensitivity
+		if device == "Mobile" then
+			sensitivity = CameraConfig.Mobile.Sensitivity
+		elseif device == "Gamepad" then
+			sensitivity = CameraConfig.Gamepad.Sensitivity
+		end
+
+		-- Apply look delta to yaw and pitch
+		yaw = yaw - lookDelta.X * sensitivity
+		pitch = pitch - lookDelta.Y * sensitivity
+
+		-- Handle Y inversion
+		local invertY = false
+		if device == "Mobile" then
+			invertY = CameraConfig.Mobile.InvertY
+		elseif device == "PC" then
+			invertY = CameraConfig.PC.InvertY
+		elseif device == "Gamepad" then
+			invertY = CameraConfig.Gamepad.InvertY
+		end
+
+		if invertY then
+			pitch = pitch + lookDelta.Y * sensitivity * 2 -- Undo and invert
+		end
+
+		-- Clamp pitch to prevent flipping
+		pitch = math.clamp(pitch, CameraConfig.MinPitch, CameraConfig.MaxPitch)
 	end
-
-	-- Apply look delta to yaw and pitch
-	yaw = yaw - lookDelta.X * sensitivity
-	pitch = pitch - lookDelta.Y * sensitivity
-
-	-- Handle Y inversion
-	local invertY = false
-	if device == "Mobile" then
-		invertY = CameraConfig.Mobile.InvertY
-	elseif device == "PC" then
-		invertY = CameraConfig.PC.InvertY
-	elseif device == "Gamepad" then
-		invertY = CameraConfig.Gamepad.InvertY
-	end
-
-	if invertY then
-		pitch = pitch + lookDelta.Y * sensitivity * 2 -- Undo and invert
-	end
-
-	-- Clamp pitch to prevent flipping
-	pitch = math.clamp(pitch, CameraConfig.MinPitch, CameraConfig.MaxPitch)
 
 	-- Calculate target camera CFrame
 	local targetCF = calculateCameraCFrame(characterPos)

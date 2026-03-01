@@ -9,9 +9,10 @@ local ScrapperSkills = require(script.Parent.ScrapperSkills)
 
 return {
 	-- Vanguard
+	["Aerial Slash"] = VanguardSkills.AerialSlash,
 	["Iron Will"] = VanguardSkills.IronWill,
-	["Seismic Slam"] = VanguardSkills.SeismicSlam,
-	["Blade Storm"] = VanguardSkills.BladeStorm,
+	["Iron Grip"] = VanguardSkills.IronGrip,
+	-- (Blade Storm removed; Skill2 is now the Battle Hardened passive — no server handler needed)
 
 	-- Biker King
 	["Inferno Ramp"] = BikerKingSkills.InfernoRamp,

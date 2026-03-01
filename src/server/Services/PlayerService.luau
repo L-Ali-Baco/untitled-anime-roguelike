@@ -40,6 +40,20 @@ function PlayerService:OnCharacterAdded(player, character)
 		-- Set default humanoid properties
 		humanoid.WalkSpeed = 18 -- Match MovementConfig
 	end
+
+	-- Remove spawn ForceField so enemies can deal damage immediately.
+	-- Roblox's SpawnLocation grants a ForceField by default; TakeDamage() is
+	-- silently blocked while one exists.
+	for _, child in character:GetChildren() do
+		if child:IsA("ForceField") then
+			child:Destroy()
+		end
+	end
+	character.ChildAdded:Connect(function(child)
+		if child:IsA("ForceField") then
+			child:Destroy()
+		end
+	end)
 end
 
 return PlayerService

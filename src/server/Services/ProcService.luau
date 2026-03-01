@@ -20,6 +20,7 @@ local StatLib = require(Shared:WaitForChild("Lib"):WaitForChild("StatLib"))
 local EnemyLib = require(Shared:WaitForChild("Lib"):WaitForChild("EnemyLib"))
 local CombatLib = require(Shared:WaitForChild("Lib"):WaitForChild("CombatLib"))
 
+local MathUtil = require(Shared:WaitForChild("Lib"):WaitForChild("MathUtil"))
 local ItemService = require(script.Parent.ItemService)
 
 local ProcService = {
@@ -31,49 +32,94 @@ local CombatService = nil -- Circular dependency if required directly? We'll see
 -- CombatService calls ProcService, ProcService might need to deal damage via CombatService logic?
 -- Better to handle damage directly here or replicate essential logic.
 
--- Cooldowns for procs per player/item to prevent infinite loops or lag
-local procCooldowns = {} -- [Player][ProcID] = time
+-- Cooldowns for procs per player/item to prevent spam on rapid-fire classes.
+-- Structure: { [Player]: { [ProcId]: expiryTick } }
+local procCooldowns: { [Player]: { [string]: number } } = {}
+
+-- Minimum seconds between proc triggers for the same player+proc combination.
+-- This prevents Scrapper (0.12s fire rate) from spamming ChainLightning 8x/sec.
+local PROC_COOLDOWN = 0.25
+
+local function checkAndSetProcCooldown(player: Player, procId: string): boolean
+	local now = tick()
+	if not procCooldowns[player] then
+		procCooldowns[player] = {}
+	end
+	local expiry = procCooldowns[player][procId] or 0
+	if now < expiry then
+		return false -- still on cooldown
+	end
+	procCooldowns[player][procId] = now + PROC_COOLDOWN
+	return true
+end
 
 --[[
---[[
     Effect: Chain Lightning (Static Filament)
+    Stacking increases chain targets (more enemies hit), not raw damage.
+    At 50 stacks without diminishing returns: 50×0.4 = 20× base damage per zap.
+    With this formula: approaches 2.0× as a hard cap.
+
+    VFX: fires "ChainLightningVFX" to all clients with a flat array of bounce
+    segments ({From, To} pairs). Clients render pooled LightningBeam arcs in a
+    cascade. isCrit is forwarded so clients can use the gold palette.
 ]]
 local function triggerChainLightning(
 	attacker: Player,
 	primaryTarget: Model,
 	procData: any,
 	stackCount: number,
-	inventory: { [string]: number }?
+	inventory: { [string]: number }?,
+	isCrit: boolean?
 )
-	local damageMult = procData.Damage * stackCount
+	-- Diminishing returns: base=0.4, hard cap=2.0 (5× the single-stack value)
+	local damageMult = MathUtil.HyperbolicScale(stackCount, procData.Damage, 2.0)
 	-- Fetch player's dynamic base damage from StatLib
 	local baseDamage = StatLib:GetStat(attacker, "Damage", 10, inventory) * (CombatConfig.Server.DamageMultiplier or 1)
 
 	local radius = procData.Radius or 20
+	-- Extra stacks increase chain count (more satisfying than raw damage)
+	local maxChain = math.min(3 + (stackCount - 1), 10) -- caps at 10 chains
 	local enemies = CombatLib.getEnemiesInRadius(primaryTarget:GetPivot().Position, radius, { primaryTarget })
 
-	-- Pick random targets (limit 3 for now)
-	local chainCount = 0
-	local maxChain = 3
+	-- ── Build bounce segment list for VFX ──────────────────────────────────
+	-- Each segment is a {From, To} pair representing one lightning arc.
+	-- We walk from the primary target outward through the chain.
+	-- Collected before the damage loop so positions reflect pre-death locations.
+	local bounces: { { From: Vector3, To: Vector3 } } = {}
+	local prevPos: Vector3 = primaryTarget:GetPivot().Position
 
+	local chainCount = 0
 	for _, enemy in enemies do
 		if chainCount >= maxChain then
 			break
 		end
 
-		-- Deal damage via EnemyLib (Directly for now, bypassing CombatService to avoid infinite loops)
-		-- TODO: Should this trigger *other* procs? Usually no.
+		local enemyPos = enemy:GetPivot().Position
+
+		-- Record the arc segment: previous target → this target.
+		table.insert(bounces, { From = prevPos, To = enemyPos })
+		prevPos = enemyPos
+
+		-- Bypasses CombatService intentionally: proc damage must not re-trigger procs.
 		EnemyLib:TakeDamage(enemy, baseDamage * damageMult)
 		chainCount += 1
+	end
 
-		-- VFX
-		-- TODO: Fire remote for lightning bolt
-		print("ZAP! " .. enemy.Name)
+	-- ── Fire VFX remote to all clients ────────────────────────────────────
+	-- Only fire if there were actual bounces to display.
+	if chainCount > 0 then
+		local vfxRemote = Remotes:GetEvent("ChainLightningVFX")
+		if vfxRemote then
+			vfxRemote:FireAllClients(bounces, isCrit == true)
+		end
 	end
 end
 
 --[[
     Effect: Explosion (Volatile Casing)
+    Stacking increases explosion radius (capped at 40 studs) and damage.
+    At 50 stacks without caps: radius=260, damage=75× — screen-filling instant kills.
+    With this formula: radius caps at 40, damage approaches 5.0× base.
 ]]
 local function triggerExplosion(
 	attacker: Player,
@@ -82,8 +128,10 @@ local function triggerExplosion(
 	stackCount: number,
 	inventory: { [string]: number }?
 )
-	local radius = procData.Radius + (5 * (stackCount - 1)) -- Scaling radius
-	local damageMult = procData.Damage * stackCount
+	-- Radius: grows with stacks but hard-capped at 40 studs
+	local radius = math.min(procData.Radius + (3 * (stackCount - 1)), 40)
+	-- Damage: diminishing returns, base=1.5 (150%), hard cap=5.0 (500%)
+	local damageMult = MathUtil.HyperbolicScale(stackCount, procData.Damage, 5.0)
 	-- Fetch player's dynamic base damage from StatLib
 	local baseDamage = StatLib:GetStat(attacker, "Damage", 10, inventory) * (CombatConfig.Server.DamageMultiplier or 1)
 
@@ -93,8 +141,6 @@ local function triggerExplosion(
 	for _, enemy in enemies do
 		EnemyLib:TakeDamage(enemy, baseDamage * damageMult)
 	end
-
-	print("BOOM! Radius:", radius)
 end
 
 --[[
@@ -117,13 +163,15 @@ function ProcService:ProcessHit(attacker: Player, target: Model, damageDealt: nu
 				end
 
 				if shouldTrigger then
-					-- Roll chance
-					if math.random() <= proc.Chance then
-						-- Trigger!
-						if proc.Id == "ChainLightning" then
-							triggerChainLightning(attacker, target, proc, count, inventory)
-						elseif proc.Id == "Vacuum" then
-							-- triggerVacuum(...)
+					-- Cooldown gate first (cheap check before RNG)
+					if checkAndSetProcCooldown(attacker, proc.Id) then
+						-- Roll chance
+						if math.random() <= proc.Chance then
+							if proc.Id == "ChainLightning" then
+								triggerChainLightning(attacker, target, proc, count, inventory, isCrit)
+							elseif proc.Id == "Vacuum" then
+								-- triggerVacuum(...)
+							end
 						end
 					end
 				end
@@ -143,10 +191,11 @@ function ProcService:ProcessKill(attacker: Player, target: Model)
 		if item and item.Procs then
 			for _, proc in pairs(item.Procs) do
 				if proc.Type == "OnKill" then
-					-- Roll chance
-					if math.random() <= proc.Chance then
-						if proc.Id == "Explosion" then
-							triggerExplosion(attacker, target, proc, count, inventory)
+					if checkAndSetProcCooldown(attacker, proc.Id) then
+						if math.random() <= proc.Chance then
+							if proc.Id == "Explosion" then
+								triggerExplosion(attacker, target, proc, count, inventory)
+							end
 						end
 					end
 				end
@@ -160,6 +209,10 @@ function ProcService:Init()
 end
 
 function ProcService:Start()
+	-- Clean up cooldown table when players leave
+	Players.PlayerRemoving:Connect(function(player)
+		procCooldowns[player] = nil
+	end)
 	print("[ProcService] Started")
 end
 

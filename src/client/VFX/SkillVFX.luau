@@ -6,12 +6,15 @@
     for visual cohesion across all abilities.
 ]]
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local IronGripVFX = require(script.Parent.IronGripVFX)
+local SlashVFX = require(script.Parent.SlashVFX)
 
 local SkillVFX = {}
 
@@ -665,10 +668,18 @@ end
     Handle skill used event
 ]]
 local function onSkillUsed(player, _slot, skillData)
+	-- Local player's VFX is already played via client-side prediction in
+	-- SkillController.playLocalFeedback(). Playing it again here from the
+	-- server confirmation produces a double-effect (two expanding crescents
+	-- that look like a shockwave). Other players have no prediction, so they
+	-- do need the server-fired event.
+	if player == Players.LocalPlayer then
+		return
+	end
 	SkillVFX:PlaySkillEffect(player, skillData)
 end
 
-function SkillVFX:PlaySkillEffect(player, skillData)
+function SkillVFX:PlaySkillEffect(player, skillData, hitPos: Vector3?)
 	print("[SkillVFX] Effect:", skillData.Name, "for", player.Name)
 	local char = player.Character
 	if not char then
@@ -680,9 +691,83 @@ function SkillVFX:PlaySkillEffect(player, skillData)
 		if root then
 			playSeismicSlam(root, skillData.Radius or 15)
 		end
+	elseif skillData.Name == "Iron Grip" then
+		-- ── Animation ─────────────────────────────────────────────────────
+		local humanoid = char:FindFirstChildOfClass("Humanoid")
+		if humanoid and skillData.AnimationId then
+			local animator = humanoid:FindFirstChildOfClass("Animator")
+				or (function()
+					local a = Instance.new("Animator")
+					a.Parent = humanoid
+					return a
+				end)()
+			local anim = Instance.new("Animation")
+			anim.AnimationId = skillData.AnimationId
+			local track = animator:LoadAnimation(anim)
+			track.Priority = Enum.AnimationPriority.Action
+			track.Looped = false
+			track:Play(0.05)
+			Debris:AddItem(anim, 5)
+		end
+
+		-- ── VFX: full 3-act sequence (cast ring → live tether → impact burst)
+		IronGripVFX.Play(char, skillData)
 	elseif skillData.Name == "Blade Storm" then
 		if root then
 			playBladeStorm(root)
+		end
+	elseif skillData.Name == "Aerial Slash" then
+		-- ── Animation ─────────────────────────────────────────────────────
+		local humanoid = char:FindFirstChildOfClass("Humanoid")
+		if humanoid and skillData.AnimationId then
+			local animator = humanoid:FindFirstChildOfClass("Animator")
+				or (function()
+					local a = Instance.new("Animator")
+					a.Parent = humanoid
+					return a
+				end)()
+			local anim = Instance.new("Animation")
+			anim.AnimationId = skillData.AnimationId
+			local track = animator:LoadAnimation(anim)
+			track.Priority = Enum.AnimationPriority.Action
+			track.Looped = false
+			track:Play(0.05)
+			Debris:AddItem(anim, 5)
+		end
+
+		-- Lock in the spawn direction IMMEDIATELY.
+		-- (If we wait 0.38s to fetch it, the player might have turned around)
+		local castCFrame = root.CFrame
+		local origin = castCFrame.Position
+		local lookDir = castCFrame.LookVector
+		local hitTime = skillData.HitTime or 0.38
+
+		-- ── VFX: main traveling crescent (SlashVFX) ────────────────────────
+		task.delay(hitTime, function()
+			if char and char.Parent then
+				SlashVFX.Play(origin, lookDir)
+			end
+		end)
+
+		-- ── EchoBlade VFX ─────────────────────────────────────────────────
+		-- Read stack count from player attributes (set server-side by ItemService).
+		-- isEcho flag on skillData prevents the echo from spawning its own echo.
+		if not skillData.IsEcho then
+			local echoStacks = player:GetAttribute("Item_EchoBlade") or 0
+			if echoStacks > 0 then
+				-- Ghostly cyan palette so the echo is visually distinct from the main slash
+				local ECHO_MAIN = Color3.fromRGB(200, 240, 255) -- icy white-blue leading edge
+				local ECHO_BODY = Color3.fromRGB(0, 180, 255) -- bright cyan body glow
+				task.delay(hitTime + 0.25, function()
+					if char and char.Parent then
+						SlashVFX.Play(origin, lookDir, {
+							scale = 0.8,
+							mainColor = ECHO_MAIN,
+							bodyColor = ECHO_BODY,
+						})
+					end
+				end)
+			end
 		end
 	elseif skillData.Name == "Buckshot Blast" then
 		if root then

@@ -25,35 +25,50 @@ return {
 	-- VANGUARD (Warrior)
 	-- ==========================================
 	Vanguard = {
-		-- M2: Defensive / Utility
+		-- M2: Low-cooldown ranged slash (great against flying enemies)
 		Secondary = {
-			Name = "Iron Will",
-			Description = "Gain a temporary Barrier for 30% Max HP. Taking damage grants a damage buff.",
-			Icon = "rbxassetid://6031289529", -- Placeholder: Shield
-			Cooldown = 8,
-			Duration = 5,
-			ShieldPercent = 0.3, -- 30% Max HP
-			DamageBuff = 0.2, -- +20% Damage on hit
+			Name = "Aerial Slash",
+			Description = "Launch a crescent slash wave forward. Prioritizes elevated enemies.",
+			Icon = "rbxassetid://6031097903", -- Sword icon
+			Cooldown = 3, -- Low cooldown — spammable poke/anti-air
+			AnimationId = "rbxassetid://101805537227722",
+			HitTime = 0.38, -- Animation impact frame (L→R)
+			Damage = 1.8, -- 180% base — poke tool; anti-air bonus makes it shine vs airborne
+			Range = 65, -- Max distance the wave travels (studs)
+			TravelSpeed = 90, -- Studs per second the wave moves forward
+			HitboxSize = Vector3.new(14, 22, 12), -- Tall box — catches flying enemies; Z=12 ensures sweep overlap
+			HitboxOffset = Vector3.new(-2, 4, 0), -- Elevated centre (aerial bias)
+			Knockback = 22, -- Strong lateral knockback (sends them sideways)
+			Hitstop = 0.06,
+			ScreenShake = 0.5,
+			-- Flying enemy bonus
+			-- Threshold raised to 8: tall grounded enemies (Brutes) have their root at ~floor+7-9
+			-- and were falsely triggering the 4× multiplier. 8 studs requires genuine airtime.
+			FlyingHeightThreshold = 8, -- Studs above player Y = "flying"
+			FlyingDamageMultiplier = 2.2, -- 2.2× vs airborne — rewarding, not a one-shot nuke
+			VFXType = "AerialSlash", -- Key for AttackVFXConfig lookup
 		},
-		-- E: Crowd Control
+		-- E: Pull — Iron Grip
 		Skill1 = {
-			Name = "Seismic Slam",
-			Description = "Leap and slam the ground, knocking enemies UP.",
-			Icon = "rbxassetid://6034509993", -- Placeholder: Impact
+			Name = "Iron Grip",
+			Description = "Extend iron chains and YANK all nearby enemies toward you.",
+			Icon = "rbxassetid://6034509993",
 			Cooldown = 12,
-			Damage = 2.5, -- 250% Damage
-			Radius = 15,
-			KnockupForce = 60,
+			AnimationId = "rbxassetid://111620876629826",
+			HitTime = 0.45, -- Cast frame when chains release
+			Damage = 0.6, -- 60% base — utility skill, not a nuke
+			Range = 35, -- Radius (studs) around player to catch enemies
+			PullForce = 70, -- Velocity applied toward player (studs/sec)
+			PullUp = 8, -- Small upward pop so they arc in nicely
 		},
-		-- R: Ultimate / Burst
-		Skill2 = {
-			Name = "Blade Storm",
-			Description = "Unleash a flurry of rapid slashes in front of you.",
-			Icon = "rbxassetid://6031097903", -- Placeholder: Sword
-			Cooldown = 15,
-			Damage = 0.8, -- Per hit (hits multiple times)
-			HitCount = 6, -- Hits 6 times
-			Duration = 1.5,
+		-- Passive: Shield regeneration
+		Passive = {
+			Name = "Battle Hardened",
+			Description = "PASSIVE: Vanguard's iron will regenerates 2 Shield per second, up to 25% of Max Health. Shield absorbs damage before HP.",
+			Icon = "rbxassetid://6031289529",
+			Cooldown = 0,
+			ShieldRegenRate = 2, -- Shield gained per second
+			ShieldCapPercent = 0.25, -- Max shield = 25% of MaxHealth
 		},
 	},
 
@@ -72,14 +87,19 @@ return {
 		},
 		Skill1 = {
 			Name = "Trip-Wire Spool",
-			Description = "TRAP: Deploy a high-tension tripwire. Enemies crossing trigger a shrapnel explosion.",
+			Description = "TRAP: Spool a high-tension tripwire between two points. Enemies crossing trigger a shrapnel blast that snares them.",
 			Icon = "rbxassetid://6031097903", -- Trap
-			Cooldown = 8,
-			Range = 50,
-			MaxWireLength = 30,
-			Damage = 2.0,
-			Radius = 15,
-			Knockback = 65,
+			-- Cooldown starts when the SECOND anchor is placed (Phase 2 completion),
+			-- not when the first anchor is set — so setup time is free.
+			Cooldown = 10,
+			Range = 80,
+			MaxWireLength = 60, -- Doubled: lets players set longer ambush corridors
+			MinWireLength = 4, -- Server-side guard: prevents zero-length wires
+			Damage = 3.0, -- 300% base — trap skills need punch to justify setup cost
+			Radius = 22, -- Wider blast catches crossing enemies at higher speeds
+			Knockback = 100, -- Strong radial knockback adds knockback chaos
+			SlowFactor = 0.3, -- Survivors move at 30% speed for SlowDuration seconds
+			SlowDuration = 2.0, -- Snare window: enough for a follow-up combo
 		},
 		Passive = {
 			Name = "Kinetic Scrubber",

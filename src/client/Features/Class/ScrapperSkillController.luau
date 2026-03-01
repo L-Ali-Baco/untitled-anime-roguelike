@@ -34,8 +34,14 @@ local overheatEndTime = 0
 -- State: Trip-Wire
 local isSpooling = false
 local spoolStartPos = nil
+local spoolStartTime = 0 -- tick() when Phase 1 began; guards against instant double-fire
 local spoolWireVisual = nil
 local skill1CooldownEnd = 0
+
+-- Minimum seconds between Phase 1 (start anchor) and Phase 2 (end anchor).
+-- Prevents a rapid second press from immediately completing a zero-length wire.
+-- 0.5s is imperceptible to a deliberate player but stops accidental double-fires.
+local MIN_SPOOL_HOLD_TIME = 0.5
 
 --[[
     Update Kinetic Scrubber Heat
@@ -215,6 +221,7 @@ local function onSkill1Pressed()
 
 		-- Start Spooling
 		isSpooling = true
+		spoolStartTime = tick() -- record when Phase 1 began for the minimum time gate
 		LocalPlayer:SetAttribute("TripWireSpooling", true)
 		-- The server laser aims 1.8 studs OFF the exact ground hit, so we store this
 		-- specifically as the starting CFrame calculation anchor
@@ -240,6 +247,15 @@ function ScrapperSkillController:EndTripWire(rootPart: BasePart?)
 		return
 	end
 
+	-- ── GUARD 1: Minimum time ────────────────────────────────────────────────
+	-- Reject end requests that arrive less than MIN_SPOOL_HOLD_TIME seconds after
+	-- Phase 1 started. This is the primary fix for the "instant double-wire" bug:
+	-- a rapid second press (or a ghost double-fire on mobile) is silently ignored
+	-- and the player remains in spooling state.
+	if tick() - spoolStartTime < MIN_SPOOL_HOLD_TIME then
+		return
+	end
+
 	local endPos = spoolStartPos
 	if rootPart then
 		-- Raycast to find the exact ending floor node position
@@ -255,6 +271,16 @@ function ScrapperSkillController:EndTripWire(rootPart: BasePart?)
 		endPos = shootPos
 	end
 
+	-- ── GUARD 2: Minimum wire length ─────────────────────────────────────────
+	-- Reject placements where the end anchor is too close to the start anchor.
+	-- Without this, a player standing still can create a length-0 invisible wire
+	-- that immediately self-destructs on the server (distance > MaxWireLength+5 check).
+	-- We use a flat 4-stud floor — enough that the wire is visible and the hitbox works.
+	local minLength = SkillConfig.Scrapper.Skill1.MinWireLength or 4
+	if spoolStartPos and (endPos - spoolStartPos).Magnitude < minLength then
+		return -- Stay in spooling state; player needs to move further away
+	end
+
 	isSpooling = false
 	LocalPlayer:SetAttribute("TripWireSpooling", false)
 
@@ -264,11 +290,11 @@ function ScrapperSkillController:EndTripWire(rootPart: BasePart?)
 	end
 
 	print("[ScrapperSkillController] Ending Trip-Wire. Requesting server EndNode at:", endPos)
-	-- Tell Server to finish spooling
-	local requestSkill = Remotes:GetEvent("RequestSkill")
-	if requestSkill then
-		-- Re-fire Skill1, and the server's ScrapperSkills logic will know this is the "End" call
-		requestSkill:FireServer("Skill1", nil, endPos)
+	-- Phase 2: use the dedicated RequestTripWire remote so the server knows unambiguously
+	-- that this is the end-anchor placement, not a new Phase 1 start.
+	local tripWireRemote = Remotes:GetEvent("RequestTripWire")
+	if tripWireRemote then
+		tripWireRemote:FireServer(endPos)
 	end
 	spoolStartPos = nil
 end
@@ -326,6 +352,7 @@ function ScrapperSkillController:Start()
 			end
 			isSpooling = false
 			spoolStartPos = nil
+			spoolStartTime = 0
 			if spoolWireVisual then
 				spoolWireVisual:Destroy()
 				spoolWireVisual = nil

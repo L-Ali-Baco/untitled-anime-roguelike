@@ -59,41 +59,61 @@ local function spawnMineNode(pos: Vector3, name: string): Instance
 	end
 end
 
+--[[
+	Phase 1 — called by SkillService when RequestSkill("Skill1") fires.
+	Spawns the start anchor only. Does NOT arm the wire.
+	SkillService does not set a cooldown for this press.
+]]
 function ScrapperSkills.TripWireSpool(player: Player, skillData: any, target: Model?, aimPos: Vector3?)
+	-- Guard: if a wire is already being spooled, ignore duplicate Phase-1 requests.
+	-- (Shouldn't happen since the client blocks it, but safe-guards against desyncs.)
+	if activeTripWires[player] then
+		return
+	end
+
+	if not aimPos then
+		return
+	end
+
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = { player.Character }
+
+	local rayResult = Workspace:Raycast(aimPos + Vector3.new(0, 2, 0), Vector3.new(0, -100, 0), rayParams)
+	if rayResult then
+		aimPos = rayResult.Position
+	end
+
+	local startNode = spawnMineNode(aimPos, "TripWireStartNode")
+
+	activeTripWires[player] = {
+		StartNode = startNode,
+		StartPos = aimPos,
+		StartTime = tick(),
+	}
+end
+
+--[[
+	Phase 2 — called by SkillService when RequestTripWire fires.
+	Strings the wire between the start anchor and the end position, then arms it.
+	SkillService sets the cooldown and fires SkillUsed after calling this.
+]]
+function ScrapperSkills.TripWireEnd(player: Player, aimPos: Vector3?)
 	local twState = activeTripWires[player]
-
 	if not twState then
-		-- Start spooling
-		if not aimPos then
-			return
-		end
+		warn("[ScrapperSkills] TripWireEnd: no active spool for", player.Name)
+		return
+	end
+	if not aimPos then
+		warn("[ScrapperSkills] TripWireEnd: aimPos is nil for", player.Name)
+		return
+	end
 
-		-- Raycast straight down from the aim position to ensure it snaps to the floor
-		local rayParams = RaycastParams.new()
-		rayParams.FilterType = Enum.RaycastFilterType.Exclude
-		rayParams.FilterDescendantsInstances = { player.Character }
+	-- Clear state immediately so no further Phase-2 calls can double-process
+	activeTripWires[player] = nil
 
-		-- Start the ray slightly above the aimPos in case they aimed exactly at the floor
-		local rayResult = Workspace:Raycast(aimPos + Vector3.new(0, 2, 0), Vector3.new(0, -100, 0), rayParams)
-		if rayResult then
-			aimPos = rayResult.Position
-		end
-
-		local startNode = spawnMineNode(aimPos, "TripWireStartNode")
-
-		activeTripWires[player] = {
-			StartNode = startNode,
-			StartPos = aimPos,
-			StartTime = tick(),
-		}
-	else
-		-- End spooling
-		print("[ScrapperSkills] Received end spool request for", player.Name)
-		if not aimPos then
-			warn("[ScrapperSkills] aimPos is nil, dropping request")
-			return
-		end
-		activeTripWires[player] = nil
+	do
+		print("[ScrapperSkills] Arming trip-wire for", player.Name)
 
 		-- Raycast straight down from the aim position to ensure it snaps to the floor
 		local rayParams = RaycastParams.new()
@@ -128,21 +148,30 @@ function ScrapperSkills.TripWireSpool(player: Player, skillData: any, target: Mo
 		local wireStart = startPos + Vector3.new(0, 1.8, 0)
 		local wireEnd = aimPos + Vector3.new(0, 1.8, 0)
 
-		-- Make the wire look like the thick red/pink cables wrapped around the mine
+		-- Make the wire look like the thick red/pink cables wrapped around the mine.
+		-- Width increased 0.15 → 0.22 so the wire is clearly visible at distance.
 		local wireVisual = Instance.new("Part")
 		wireVisual.Shape = Enum.PartType.Cylinder
-		wireVisual.Size = Vector3.new(distance, 0.15, 0.15) -- Cylinder dimensions are Length, Radius, Radius along X axis
+		wireVisual.Size = Vector3.new(distance, 0.22, 0.22)
 
-		-- Cylinder's length is along the X axis, so we need to look at the target and then rotate 90 degrees on Y
+		-- Cylinder's length is along the X axis, so we look at the target and rotate 90° on Y
 		wireVisual.CFrame = CFrame.lookAt(wireStart, wireEnd)
 			* CFrame.new(0, 0, -distance / 2)
 			* CFrame.Angles(0, math.rad(90), 0)
 
 		wireVisual.Anchored = true
 		wireVisual.CanCollide = false
-		wireVisual.Material = Enum.Material.Fabric -- To give it a matte, cable-like texture
-		wireVisual.Color = Color3.fromRGB(200, 60, 60) -- Desaturated rusty red to match the mine's wire color
+		wireVisual.Material = Enum.Material.Neon -- Neon so it's visible in dark areas
+		wireVisual.Color = Color3.fromRGB(220, 50, 50) -- Bright red threat colour
 		wireVisual.Name = "TripWireLaser"
+
+		-- Faint glow makes the wire readable across the room
+		local wireGlow = Instance.new("PointLight")
+		wireGlow.Color = Color3.fromRGB(255, 60, 60)
+		wireGlow.Range = 6
+		wireGlow.Brightness = 0.6
+		wireGlow.Parent = wireVisual
+
 		wireVisual.Parent = Workspace
 
 		-- Setup overlap params
@@ -276,8 +305,12 @@ function ScrapperSkills.TripWireSpool(player: Player, skillData: any, target: Mo
 					blastParams.FilterDescendantsInstances = ignoreList
 					local blastParts = workspace:GetPartBoundsInRadius(explosionPos, hitRadius, blastParams)
 
+					local Remotes = require(game:GetService("ReplicatedStorage").Shared.Remotes)
 					local hitEnemies = {}
+					local damageNumberBatch = {}
 					local enemiesStruck = 0
+					local slowDuration = SkillConfig.Scrapper.Skill1.SlowDuration or 2.0
+					local slowFactor = SkillConfig.Scrapper.Skill1.SlowFactor or 0.3
 
 					for _, bPart in ipairs(blastParts) do
 						local bModel = bPart:FindFirstAncestorOfClass("Model")
@@ -293,21 +326,38 @@ function ScrapperSkills.TripWireSpool(player: Player, skillData: any, target: Mo
 								false
 							)
 
-							local showDamageRemote =
-								require(game:GetService("ReplicatedStorage").Shared.Remotes):GetEvent(
-									"ShowDamageNumber"
-								)
-							if showDamageRemote then
-								showDamageRemote:FireAllClients(bModel, SkillConfig.Scrapper.Skill1.Damage, "Skill")
-							end
+							-- SNARE: slow survivors so they can't just run through the blast.
+							-- BaseEnemy reads WalkSpeed each tick, so overwriting the attribute
+							-- takes effect on the very next AI heartbeat.
+							local baseSpeed = bModel:GetAttribute("WalkSpeed") or 14
+							local slowedSpeed = math.max(1, math.floor(baseSpeed * slowFactor))
+							bModel:SetAttribute("WalkSpeed", slowedSpeed)
+							bModel:SetAttribute("TripWireSlowed", true)
+							task.delay(slowDuration, function()
+								if bModel.Parent and bModel:GetAttribute("TripWireSlowed") then
+									bModel:SetAttribute("WalkSpeed", baseSpeed)
+									bModel:SetAttribute("TripWireSlowed", false)
+								end
+							end)
+
+							-- Collected for batch fire after the loop (see ShowDamageNumbers below)
+							table.insert(damageNumberBatch, { bModel, SkillConfig.Scrapper.Skill1.Damage, "Skill" })
+						end
+					end
+
+					-- Send all damage numbers in one packet instead of N separate FireAllClients calls
+					if #damageNumberBatch > 0 then
+						local batchRemote = Remotes:GetEvent("ShowDamageNumbers")
+						if batchRemote then
+							batchRemote:FireAllClients(damageNumberBatch)
 						end
 					end
 
 					if enemiesStruck > 0 then
-						local addHeatEvent =
-							require(game:GetService("ReplicatedStorage").Shared.Remotes):GetEvent("AddScrapperHeat")
+						local addHeatEvent = Remotes:GetEvent("AddScrapperHeat")
 						if addHeatEvent then
-							addHeatEvent:FireClient(player, 50)
+							-- Scale heat reward: catching more enemies = bigger heat spike
+							addHeatEvent:FireClient(player, math.min(50 * enemiesStruck, 150))
 						end
 					end
 

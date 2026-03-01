@@ -49,6 +49,20 @@ local activeAttacks: { { id: string, expiry: number } } = {}
 -- Track combo state per player to prevent sequence exploits (e.g. skipping to attack 3)
 local playerComboState: { [Player]: { CurrentIndex: number, LastAttackTime: number } } = {}
 
+-- Cached OverlapParams for AoE hit detection. Rebuilt only when player count changes.
+-- Avoids allocating a new OverlapParams + ignoreList on every ranged shot or dash hit.
+local cachedOverlapParams: OverlapParams = OverlapParams.new()
+local function rebuildIgnoreList()
+	local list = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			table.insert(list, p.Character)
+		end
+	end
+	cachedOverlapParams.FilterDescendantsInstances = list
+	cachedOverlapParams.FilterType = Enum.RaycastFilterType.Exclude
+end
+
 --[[
     Get the root part of a target (works for players and NPCs)
 ]]
@@ -340,8 +354,11 @@ function CombatService.ApplyDamage(
 		)
 	end
 
-	if targetDied and ProcService then
-		ProcService:ProcessKill(attacker, target)
+	if targetDied then
+		if ProcService then
+			ProcService:ProcessKill(attacker, target)
+		end
+		ItemService:AddScrap(attacker, 5) -- Grant 5 Scrap per kill
 	end
 
 	return true, targetDied
@@ -364,6 +381,48 @@ local function processDamage(attacker: Player, target: Model, attackIndex: numbe
 	end
 
 	return CombatService.ApplyDamage(attacker, target, attackId, attackData.Damage, attackData.Knockback, false)
+end
+
+--[[
+    Snap an enemy to melee range before the Finisher lands.
+    Called server-side for attackIndex==3 so the slam always connects
+    even if the player and enemy drifted slightly apart.
+    Uses PivotTo directly — no physics constraints needed for a short snap.
+]]
+local function snapEnemyToMelee(playerCharacter: Model, target: Model)
+	local playerRoot = playerCharacter:FindFirstChild("HumanoidRootPart")
+	local targetRoot = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
+	if not playerRoot or not targetRoot then
+		return
+	end
+
+	-- Only snap if the enemy is within a generous window (prevents teleporting)
+	local dist = (playerRoot.Position - targetRoot.Position).Magnitude
+	if dist > 20 then
+		return
+	end
+
+	-- Neuter AI mover briefly so the snap isn't immediately fought
+	local aiLV = targetRoot:FindFirstChild("EnemyMoveVelocity") :: LinearVelocity?
+	if aiLV then
+		aiLV.MaxForce = 0
+		aiLV.PlaneVelocity = Vector2.zero
+	end
+
+	-- Snap to 2.5 studs in front of player, facing toward player
+	local snapPos = playerRoot.Position + playerRoot.CFrame.LookVector * 2.5
+	local facingAngle = math.atan2(-playerRoot.CFrame.LookVector.X, -playerRoot.CFrame.LookVector.Z)
+	target:PivotTo(CFrame.new(snapPos) * CFrame.Angles(0, facingAngle, 0))
+	targetRoot.AssemblyLinearVelocity = Vector3.zero
+
+	-- Restore AI after 0.35s (finisher animation + knockback window)
+	if aiLV then
+		task.delay(0.35, function()
+			if aiLV.Parent then
+				aiLV.MaxForce = 50000
+			end
+		end)
+	end
 end
 
 --[[
@@ -397,6 +456,10 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 	for _, target in targets do
 		local tValid, tError = validateAttack(player, attackIndex, target, attackId)
 		if tValid then
+			-- Finisher: snap enemy to melee range before damage so the slam always lands
+			if attackIndex == 3 and player.Character then
+				snapEnemyToMelee(player.Character, target)
+			end
 			local didDamage, targetDied = processDamage(player, target, attackIndex, attackId)
 
 			if didDamage then
@@ -597,16 +660,9 @@ local function onRequestRangedHit(
 		local hitRadius = config.Radius
 		local shredAmount = config.ShredAmount
 
-		local blastParams = OverlapParams.new()
-		local ignoreList = {}
-		for _, p in ipairs(Players:GetPlayers()) do
-			if p.Character then
-				table.insert(ignoreList, p.Character)
-			end
-		end
-		blastParams.FilterDescendantsInstances = ignoreList
+		rebuildIgnoreList()
 
-		local blastParts = workspace:GetPartBoundsInRadius(hitPosition, hitRadius, blastParams)
+		local blastParts = workspace:GetPartBoundsInRadius(hitPosition, hitRadius, cachedOverlapParams)
 		local hitEnemies = {}
 
 		for _, bPart in ipairs(blastParts) do
@@ -692,16 +748,9 @@ local function onRequestDashHit(player: Player, targetModel: Model?)
 	if rootPart and targetRoot then
 		-- Distance tolerance for slide hits
 		if (rootPart.Position - targetRoot.Position).Magnitude <= 20 then
-			local blastParams = OverlapParams.new()
-			local ignoreList = {}
-			for _, p in ipairs(Players:GetPlayers()) do
-				if p.Character then
-					table.insert(ignoreList, p.Character)
-				end
-			end
-			blastParams.FilterDescendantsInstances = ignoreList
+			rebuildIgnoreList()
 
-			local blastParts = workspace:GetPartBoundsInRadius(targetRoot.Position, config.AOERadius, blastParams)
+			local blastParts = workspace:GetPartBoundsInRadius(targetRoot.Position, config.AOERadius, cachedOverlapParams)
 			local hitEnemies = {}
 			local enemiesStruck = 0
 
@@ -764,6 +813,10 @@ function CombatService:Start()
 	-- Start cleanup loop
 	-- OPTIMIZATION: Batch cleanup operations to reduce scheduler overhead
 	RunService.Heartbeat:Connect(function()
+		-- Skip when nothing to clean up (avoids busy-loop between fights)
+		if #activeAttacks == 0 then
+			return
+		end
 		local now = tick()
 		local removeCount = 0
 
@@ -823,12 +876,18 @@ function CombatService:Start()
 		print("[CombatService] Connected to RequestDashHit remote")
 	end
 
+	-- Rebuild OverlapParams ignore list when player count changes
+	Players.PlayerAdded:Connect(function(player)
+		player.CharacterAdded:Connect(rebuildIgnoreList)
+		player.CharacterRemoving:Connect(rebuildIgnoreList)
+	end)
 	-- Cleanup when player leaves
 	Players.PlayerRemoving:Connect(function(player)
 		playerLastAttack[player] = nil
 		playerLastRangedAttack[player] = nil
 		playerLastAttackId[player] = nil
 		playerComboState[player] = nil
+		rebuildIgnoreList()
 	end)
 
 	print("[CombatService] Started successfully")

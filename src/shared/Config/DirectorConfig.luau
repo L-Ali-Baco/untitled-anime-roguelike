@@ -26,6 +26,39 @@ return {
 	SpawnCountBase = 1, -- Enemies per spawn at start
 	SpawnCountMax = 3, -- Enemies per spawn at max difficulty
 
+	-- =========================================================
+	-- CREDIT BUDGET DIRECTOR
+	-- The Director earns credits over time and spends them to
+	-- spawn enemies. A pacing state machine (Ramp / Lull) creates
+	-- natural intensity bursts followed by brief breathing room.
+	-- =========================================================
+	Credits = {
+		-- Credits earned per second at difficulty 1.0 (halved to slow early pressure)
+		BaseGrowthRate = 2.0,
+		-- Additional credits/sec earned per difficulty point above 1.0
+		-- At diff 3.0: 2.0 + 1.5 * 2.0 = 5.0 credits/sec (was 9.0)
+		ScalingGrowthRate = 1.5,
+		-- Hard cap on banked credits
+		MaxCredits = 200,
+
+		-- ── Pacing thresholds ──────────────────────────────────
+		-- Raised threshold so Director waits longer before unleashing waves
+		SpendThreshold = 50,
+		-- Credits fall to this level before entering Lull
+		LullThreshold = 8,
+		-- Extended breathing room between waves
+		LullDuration = 12.0,
+
+		-- ── Spawn costs (credits consumed per spawn) ──────────
+		SpawnCosts = {
+			Grunt = 1,
+			Elite = 5,
+			Boss = 25,
+		},
+		-- Slower spawn tick = fewer enemies per wave burst
+		SpawnTickInterval = 1.5,
+	},
+
 	-- Visual effects thresholds (difficulty level triggers)
 	Visuals = {
 		-- Sky darkening (ClockTime adjustments)
@@ -75,12 +108,12 @@ return {
 		HordeWave = {
 			Enabled = true,
 			MinDifficulty = 2.0,
-			ChancePerCheck = 0.02, -- 2% chance per check
-			Cooldown = 60, -- Minimum seconds between hordes
-			EnemyCount = 8, -- Base enemies in horde
-			EnemyCountPerDifficulty = 2, -- Additional enemies per difficulty level
-			SpawnRadius = 30, -- Spawn in circle around players
-			AnnounceDuration = 3.0, -- Warning time before spawn
+			ChancePerCheck = 0.02,
+			Cooldown = 90, -- Longer gap between hordes (was 60)
+			EnemyCount = 4, -- Halved from 8
+			EnemyCountPerDifficulty = 1, -- Halved from 2
+			SpawnRadius = 30,
+			AnnounceDuration = 3.0,
 		},
 
 		-- Treasure goblin (rare loot opportunity)

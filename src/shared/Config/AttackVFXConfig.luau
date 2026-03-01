@@ -36,7 +36,7 @@ return {
 			Color = Color3.fromRGB(30, 25, 20),
 			Transparency = 0.3,
 			StartSize = Vector3.new(0.15, 1, 1),
-			ExpandDuration = 0.1,
+			ExpandDuration = 0.25, -- was 0.1 — slower crack matches heavy impact feel
 			HoldTime = 0.8,
 			FadeDuration = 1.0,
 		},
@@ -47,17 +47,17 @@ return {
 				Color = Color3.fromRGB(255, 120, 40),
 				StartSize = Vector3.new(1.5, 3, 3),
 				HeightOffset = 0.2,
-				Duration = 0.35,
-				Lifetime = 0.4,
+				Duration = 0.5, -- was 0.35
+				Lifetime = 0.55,
 				Delay = 0,
 			},
 			{
 				Color = Color3.fromRGB(255, 200, 100),
 				StartSize = Vector3.new(1, 2, 2),
 				HeightOffset = 0.1,
-				Duration = 0.4,
-				Lifetime = 0.45,
-				Delay = 0.05,
+				Duration = 0.6, -- was 0.4
+				Lifetime = 0.65,
+				Delay = 0.08,
 				Transparency = 0.3,
 				RadiusMultiplier = 0.8,
 			},
@@ -137,11 +137,11 @@ return {
 	Swing = {
 		-- Trail arc parameters
 		Trail = {
-			Radius = 26,
+			Radius = 30,
 			Duration = 0.25,
-			StartAngle = -90, -- degrees, enemy's left
-			EndAngle = 60, -- degrees, enemy's right
-			PivotOffset = Vector3.new(0, -5, 0), -- below root part
+			StartAngle = -70, -- degrees, enemy's left
+			EndAngle = 70, -- degrees, enemy's right
+			PivotOffset = Vector3.new(0, 1, 0), -- 1 stud above root (works for all body sizes)
 			AttachmentSpacing = 2,
 			Lifetime = 0.4,
 			LightEmission = 0.8,
@@ -164,8 +164,8 @@ return {
 			}),
 		},
 
-		-- Swing center offset from enemy root
-		CenterOffset = { Forward = 15, Down = 5 },
+		-- Swing center offset from enemy root (negative Down = above root)
+		CenterOffset = { Forward = 12, Down = -1 },
 
 		-- Wind particle burst
 		WindParticles = {
@@ -292,6 +292,111 @@ return {
 	},
 
 	--[[
+        Kick -- fast low sweep for kicking attacks (MossFrog Lunge)
+        Layers: Fast thin trail arc at leg height, small debris, light ground dust
+        Reuses Swing renderer with overrides via AttackVFXPlayer:Play("Kick")
+    ]]
+	Kick = {
+		-- Trail arc: fast, thin, low to the ground
+		Trail = {
+			Radius = 9,
+			Duration = 0.10, -- Much faster than Swing (0.25) — snappy kick
+			StartAngle = -60,
+			EndAngle = 60,
+			PivotOffset = Vector3.new(0, -0.5, 0), -- Leg height
+			AttachmentSpacing = 0.6,
+			Lifetime = 0.2,
+			LightEmission = 0.6,
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(220, 200, 130)),
+				ColorSequenceKeypoint.new(0.4, Color3.fromRGB(180, 140, 50)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 90, 20)),
+			}),
+			Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.3),
+				NumberSequenceKeypoint.new(0.4, 0.55),
+				NumberSequenceKeypoint.new(0.8, 0.8),
+				NumberSequenceKeypoint.new(1, 1),
+			}),
+			WidthScale = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.7),
+				NumberSequenceKeypoint.new(0.5, 1.0),
+				NumberSequenceKeypoint.new(1, 0.2),
+			}),
+		},
+
+		CenterOffset = { Forward = 5, Down = 0.5 }, -- Low center for leg swing
+
+		-- Light wind burst
+		WindParticles = {
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(220, 190, 110)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(160, 130, 60)),
+			}),
+			Size = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.3),
+				NumberSequenceKeypoint.new(0.3, 1.5),
+				NumberSequenceKeypoint.new(1, 2.5),
+			}),
+			Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.2),
+				NumberSequenceKeypoint.new(0.5, 0.6),
+				NumberSequenceKeypoint.new(1, 1),
+			}),
+			Lifetime = NumberRange.new(0.1, 0.35),
+			Speed = NumberRange.new(20, 45),
+			SpreadAngle = Vector2.new(50, 20),
+			Drag = 5,
+			RotSpeed = NumberRange.new(-60, 60),
+			EmitCount = 10,
+			AttachmentLifetime = 0.6,
+		},
+
+		-- Light ground scuff
+		GroundDust = {
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(170, 150, 120)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(110, 100, 85)),
+			}),
+			Size = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 1),
+				NumberSequenceKeypoint.new(0.4, 2.5),
+				NumberSequenceKeypoint.new(1, 4),
+			}),
+			Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.3),
+				NumberSequenceKeypoint.new(0.5, 0.6),
+				NumberSequenceKeypoint.new(1, 1),
+			}),
+			Lifetime = NumberRange.new(0.3, 0.7),
+			Speed = NumberRange.new(5, 18),
+			SpreadAngle = Vector2.new(140, 12),
+			Drag = 6,
+			RotSpeed = NumberRange.new(-30, 30),
+			EmitCount = 8,
+			AttachmentLifetime = 1,
+		},
+
+		-- Kick debris: small dirt/pebbles
+		SmallDebris = {
+			Count = 4,
+			SizeRange = { 0.3, 0.9 },
+			ColorRange = { 50, 80, 45, 70, 40, 60 },
+			LaunchUp = { 15, 30 },
+			LaunchOut = { 8, 20 },
+			SpawnRadius = { 0.5, 2 },
+			FadeDelay = 0.5,
+			FadeDuration = 0.25,
+		},
+
+		ScreenShake = {
+			MaxDist = 30,
+			MaxIntensity = 0.3,
+			Duration = 0.1,
+		},
+	},
+
+	--[[
         Leap slam landing -- enhanced slam (bigger and stronger than normal slam)
         The Brute crashes down from height, creating a massive impact
     ]]
@@ -411,6 +516,21 @@ return {
 			MaxDist = 60, -- Bigger shake range
 			MaxIntensity = 1.0, -- Stronger shake
 			Duration = 0.35,
+		},
+	},
+
+	--[[
+        Aerial Slash (Vanguard M2) — icy blue-white, fast L→R crescent wave.
+        NOTE: Visual projectile is handled purely by SlashVFX.luau now.
+    ]]
+	AerialSlash = {
+		-- Projectile is now handled by SlashVFX.
+		-- Disable ImpactFlash and WindParticles to prevent the harsh burst.
+		CenterOffset = { Forward = 10, Down = -0.5 },
+		ScreenShake = {
+			MaxDist = 35,
+			MaxIntensity = 0.4,
+			Duration = 0.12,
 		},
 	},
 }

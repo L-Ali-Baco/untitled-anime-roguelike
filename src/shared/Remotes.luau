@@ -25,6 +25,7 @@ local REMOTE_EVENTS = {
 	"SkillUsed", -- Server -> Clients: Skill successfully used (for VFX/Cooldowns)
 	"SkillCooldown", -- Server -> Client: Skill failed/cooldown sync
 	"ShowDamageNumber", -- Server -> All Clients: Display damage number on target
+	"ShowDamageNumbers", -- Server -> All Clients: Batch damage numbers (array of {target, damage, type})
 
 	-- Enemy AI
 	"EnemyAttack", -- Server -> Clients: Enemy attacked a player (for VFX)
@@ -32,6 +33,7 @@ local REMOTE_EVENTS = {
 	"EnemyStateChanged", -- Server -> Clients: Enemy state changed (for animations)
 
 	-- Player State
+	"HealthChanged", -- Server -> Client: { CurrentHealth, MaxHealth, Shield } — for server-authoritative HUD sync
 	"IFrameStateChanged", -- Client -> Server: Player I-frame state changed (for dodge)
 	"DamageBlocked", -- Server -> Client: Damage was blocked by I-frames (for VFX)
 	"RequestDashHit", -- Client -> Server: Dash collision (Scavenger's Slide)
@@ -51,6 +53,8 @@ local REMOTE_EVENTS = {
 	"GrantItem", -- Server -> Client: Notifies player of item gained
 	"RequestOpenChest", -- Client -> Server: Request to open a loot chest
 	"ChestSpawned", -- Server -> All Clients: Visual for chest appearing
+	"PromptItemSelection", -- Server -> Client: Show W1_Chest options
+	"SelectChestItem", -- Client -> Server: Select W1_Chest option
 
 	-- Class System
 	"SelectClass", -- Client -> Server: Player selected a class
@@ -64,6 +68,16 @@ local REMOTE_EVENTS = {
 	"DirectorDifficultyUpdate", -- Server -> Client: Difficulty sync
 	"DirectorEventTriggered", -- Server -> Client: Event notification
 	"DirectorHordeWarning", -- Server -> Client: Warning of incoming horde
+
+	-- Proc VFX
+	-- Server -> All Clients: Chain lightning visual bounce data
+	-- Payload: { bounces: {{From: Vector3, To: Vector3}}, isCrit: boolean }
+	"ChainLightningVFX",
+
+	-- Economy System
+	"GoldChanged", -- Server -> Client: player's new gold total (number)
+	"GoldPickup", -- Server -> Client: gold amount collected from an orb (number) — for audio/VFX
+	"ChestOpened", -- Server -> AllClients: { ChestModel: Model, ItemKey: string, Rarity: string }
 }
 
 local REMOTE_FUNCTIONS = {

@@ -23,6 +23,7 @@ local MovementConfig = require(ReplicatedStorage.Shared.Config.MovementConfig)
 local StatLib = require(ReplicatedStorage.Shared.Lib.StatLib)
 local CharacterLib = require(ReplicatedStorage.Shared.Lib.CharacterLib)
 local EnemyLib = require(ReplicatedStorage.Shared.Lib.EnemyLib)
+local ComboVFX = require(script.Parent.Parent.VFX.ComboVFX)
 
 local CombatController = {}
 CombatController.Name = "CombatController"
@@ -91,6 +92,12 @@ local attackEndTime = 0
 local canQueueNextAttack = false
 local queuedAttack = false
 
+-- Single-timeline combo animation state
+-- The 3-hit combo animation plays ONCE across all three hits rather than
+-- restarting per hit. Hit 2 and 3 reuse this same track.
+local activeComboTrack: AnimationTrack? = nil
+local comboAnimStartTime: number = 0 -- os.clock() when the track started playing
+
 -- Configuration for input snappiness
 local MIN_INPUT_INTERVAL = 0.15 -- Minimum time between manual clicks to prevent jitter
 
@@ -149,7 +156,13 @@ local function getCharacterParts(): (Model?, Humanoid?, BasePart?)
 end
 
 --[[
-    Play attack animation (placeholder using humanoid animations)
+    Play (or continue) the combo animation.
+
+    The 3-hit combo uses ONE animation that plays from start to finish across
+    all three swings. Hit 1 starts the track; hits 2 and 3 let it keep playing
+    so the motion flows continuously through all frames.
+
+    Returns the shared AnimationTrack so callers can stop/adjust it.
 ]]
 local function playAttackAnimation(humanoid: Humanoid, comboHit: number)
 	local animator = humanoid:FindFirstChildOfClass("Animator")
@@ -158,22 +171,50 @@ local function playAttackAnimation(humanoid: Humanoid, comboHit: number)
 		animator.Parent = humanoid
 	end
 
-	-- Use built-in tool animations as placeholder
-	-- In production, replace with custom attack animations
-	local animId = AttacksConfig[comboHit].AnimationId
+	-- All three hits share the same animation ID from the config.
+	-- If a class-specific override exists, it takes slot [1].
+	local animId = AttacksConfig[1].AnimationId -- always read from slot 1 for the shared combo anim
 	if not animId then
-		-- Fallback to generic slash gesture
-		-- We'll simulate with movement
 		return nil
 	end
 
-	local animation = Instance.new("Animation")
-	animation.AnimationId = animId
+	if comboHit == 1 then
+		-- First hit: stop any leftover track from a previous combo and start fresh
+		if activeComboTrack and activeComboTrack.IsPlaying then
+			activeComboTrack:Stop(0)
+		end
 
-	local track = animator:LoadAnimation(animation)
-	track:Play()
+		local animation = Instance.new("Animation")
+		animation.AnimationId = animId
 
-	return track
+		activeComboTrack = animator:LoadAnimation(animation)
+		local track = activeComboTrack :: AnimationTrack -- non-nil assertion; LoadAnimation always returns a track
+		track.Priority = Enum.AnimationPriority.Action
+		track.Looped = false
+		track:Play(0.1) -- quick fade-in so it doesn't pop
+		comboAnimStartTime = os.clock()
+	else
+		-- Hits 2 and 3: the animation is already playing — don't restart it.
+		-- The hitbox timing in performAttack uses AbsoluteHitTime (see CombatConfig),
+		-- which is measured from comboAnimStartTime, so the hitbox fires at the
+		-- exact frame in the animation the artist intended.
+		if not activeComboTrack or not activeComboTrack.IsPlaying then
+			-- Safety: animation ended early (lag spike etc.) — restart it
+			if activeComboTrack then
+				activeComboTrack:Stop(0)
+			end
+			local animation = Instance.new("Animation")
+			animation.AnimationId = animId
+			activeComboTrack = animator:LoadAnimation(animation)
+			local track = activeComboTrack :: AnimationTrack -- non-nil assertion
+			track.Priority = Enum.AnimationPriority.Action
+			track.Looped = false
+			track:Play(0)
+			comboAnimStartTime = os.clock()
+		end
+	end
+
+	return activeComboTrack
 end
 
 --[[
@@ -279,11 +320,13 @@ local function processHits(hitTargets: { Model }, attackData: any, comboHit: num
 			-- Calculate hit position (between attacker and target)
 			local hitPosition = (rootPart.Position + targetRoot.Position) / 2
 
-			-- Spawn hit effects (fire-themed for Biker King)
+			-- Spawn hit effects (class-themed)
 			if CombatEffects then
-				local isBikerKing = ClassController and ClassController:GetCurrentClass() == "BikerKing"
-				if isBikerKing then
+				local currentClass = ClassController and ClassController:GetCurrentClass()
+				if currentClass == "BikerKing" then
 					CombatEffects:SpawnFireHitEffect(hitPosition, comboHit)
+				elseif currentClass == "Vanguard" then
+					CombatEffects:SpawnVanguardHitEffect(hitPosition, comboHit)
 				end
 				CombatEffects:SpawnHitEffects(hitPosition, nil, comboHit)
 			end
@@ -424,7 +467,20 @@ local function performAttack(comboHit: number)
 	local capturedTargetPos = targetPos
 
 	-- Schedule hitbox activation
-	task.delay(attackData.HitTime, function()
+	-- If AbsoluteHitTime is set, the hit should fire at that timestamp from the
+	-- start of the shared combo animation (so all three swings sync to the artist's intended frames).
+	-- Otherwise fall back to the legacy per-hit relative HitTime.
+	local hitDelay: number
+	if attackData.AbsoluteHitTime then
+		-- How many seconds have elapsed since the animation started?
+		local elapsed = os.clock() - comboAnimStartTime
+		-- Schedule so the hitbox fires when animation reaches AbsoluteHitTime
+		hitDelay = math.max(0, attackData.AbsoluteHitTime - elapsed)
+	else
+		hitDelay = attackData.HitTime
+	end
+
+	task.delay(hitDelay, function()
 		if not isAttacking or currentComboHit ~= comboHit then
 			return -- Attack was canceled
 		end
@@ -446,6 +502,17 @@ local function performAttack(comboHit: number)
 
 		-- Create hitbox using the CAPTURED direction but FRESH target position
 		local hitTargets = createHitbox(currentRootPart, attackData, capturedDirection, currentTargetPos)
+
+		-- Swing VFX: fires every swing at the impact point in front of the character
+		-- Positioned 4 studs forward so it appears where the weapon lands, not inside the character
+		if ClassController and ClassController:GetCurrentClass() == "Vanguard" then
+			-- Use LookVector (character's physical facing), NOT capturedDirection (aim-toward-target)
+			-- so the crescent always appears directly in front, never offset right/left
+			local fwd = currentRootPart.CFrame.LookVector
+			local swingPos = currentRootPart.Position + fwd * 4
+			ComboVFX.Play(swingPos, comboHit, LocalPlayer.Character)
+		end
+
 		processHits(hitTargets, attackData, comboHit, attackId)
 
 		-- Allow queueing next attack after hit lands
@@ -1156,18 +1223,29 @@ local function onHeartbeat(dt: number)
 	elseif attackType == "Flamethrower" then
 		-- Flamethrower is handled by handleFlamethrowerTick above if isFlamethrowerActive is true
 	else
-		-- Melee/Default: auto-attack while holding attack button
-		if InputController:IsAttackHeld() and not isAttacking and not isFlamethrowerActive then
-			local timeSinceLastAttack = os.clock() - attackEndTime
-			local attackSpeedMult = StatLib:GetStat(LocalPlayer, "AttackRate", 1.0)
-			local autoInterval = ComboConfig.AutoAttackInterval / attackSpeedMult
+		-- Melee/Default: hold-to-combo logic
+		if InputController:IsAttackHeld() and not isFlamethrowerActive then
+			if isAttacking then
+				-- MID-ATTACK HOLD: queue the next hit as soon as the queue window opens.
+				-- This is what drives hits 2 and 3 when holding — the deferred
+				-- task.delay(Duration) callback in performAttack checks queuedAttack
+				-- and calls performAttack(comboHit + 1) automatically.
+				if canQueueNextAttack and currentComboHit < ComboConfig.MaxHits then
+					queuedAttack = true
+				end
+			else
+				-- BETWEEN COMBOS: fire a new combo chain once the auto-interval elapses.
+				local timeSinceLastAttack = os.clock() - attackEndTime
+				local attackSpeedMult = StatLib:GetStat(LocalPlayer, "AttackRate", 1.0)
+				local autoInterval = ComboConfig.AutoAttackInterval / attackSpeedMult
 
-			if timeSinceLastAttack >= autoInterval then
-				startAttack()
+				if timeSinceLastAttack >= autoInterval then
+					startAttack() -- starts fresh from combo hit 1
+				end
 			end
 		end
 
-		-- Check combo timeout
+		-- Check combo timeout (combo resets if player stops attacking)
 		if not isAttacking and currentComboHit > 0 then
 			local timeSinceLastAttack = os.clock() - lastAttackTime
 			if timeSinceLastAttack > ComboConfig.ResetTime then
@@ -1233,11 +1311,13 @@ function CombatController:Start()
 				if CombatEffects and hitData.HitPosition then
 					if hitData.Attacker and hitData.Attacker.Character then
 						local attackerClass = hitData.Attacker:GetAttribute("Class")
-						if attackerClass == "BikerKing" then
-							CombatEffects:SpawnFireHitEffect(hitData.HitPosition, hitData.AttackIndex)
+						if type(hitData.AttackIndex) == "number" then
+							if attackerClass == "BikerKing" then
+								CombatEffects:SpawnFireHitEffect(hitData.HitPosition, hitData.AttackIndex)
+							end
+							CombatEffects:SpawnHitEffects(hitData.HitPosition, nil, hitData.AttackIndex)
 						end
 					end
-					CombatEffects:SpawnHitEffects(hitData.HitPosition, nil, hitData.AttackIndex)
 				end
 			end)
 		)
@@ -1249,6 +1329,20 @@ function CombatController:Start()
 			Remotes.ShowDamageNumber.OnClientEvent:Connect(function(target, damage, damageType)
 				if DamageNumbers then
 					DamageNumbers:SpawnOnCharacter(target, damage, damageType)
+				end
+			end)
+		)
+	end
+
+	-- Batch damage numbers: one remote, array payload, one packet per AoE/proc chain
+	if Remotes and Remotes.ShowDamageNumbers then
+		table.insert(
+			connections,
+			Remotes.ShowDamageNumbers.OnClientEvent:Connect(function(batch: { { any } })
+				if DamageNumbers then
+					for _, entry in ipairs(batch) do
+						DamageNumbers:SpawnOnCharacter(entry[1], entry[2], entry[3])
+					end
 				end
 			end)
 		)

@@ -5,8 +5,9 @@
 
 export type ItemEffect = {
 	Stat: string, -- "WalkSpeed", "JumpPower", "Damage", "AttackRate", "AirJumps", "StaminaRegen", "CritChance"
-	Value: number, -- Flat value or multiplier
-	Type: "Additive" | "Multiplier",
+	Value: number, -- Per-stack base value (first-stack contribution for Hyperbolic; exact per-stack for Additive/Multiplier)
+	Type: "Additive" | "Multiplier" | "Hyperbolic",
+	Cap: number?, -- Required for Type="Hyperbolic": the asymptotic ceiling the stat can never exceed
 }
 
 export type ItemProc = {
@@ -114,7 +115,9 @@ local ItemRegistry = {
 			Description = "Deal +200% Damage, but -90% Max Health.",
 			Rarity = "Legendary",
 			Icon = "rbxassetid://6031071053",
-			Tags = { "Cursed" },
+			-- "Unique" prevents stacking: a second GlassCannon would push MaxHealth
+			-- multiplier to (1 + -0.9*2) = -0.8x, producing negative HP.
+			Tags = { "Cursed", "Unique" },
 			Effects = {
 				{ Stat = "Damage", Value = 2.0, Type = "Multiplier" }, -- +200% (3x total)
 				{ Stat = "MaxHealth", Value = -0.9, Type = "Multiplier" }, -- -90% (0.1x total)
