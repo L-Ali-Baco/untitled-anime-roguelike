@@ -757,6 +757,9 @@ local function onRequestDashHit(player: Player, targetModel: Model?)
 			local blastParts = workspace:GetPartBoundsInRadius(targetRoot.Position, config.AOERadius, cachedOverlapParams)
 			local hitEnemies = {}
 			local enemiesStruck = 0
+			-- FIX: Generate attackId once per dash, not per target.
+			-- Per-target IDs were never enqueued for cleanup → memory leak in attackHitTargets.
+			local dashAttackId = "DashHit_" .. tostring(os.clock())
 
 			for _, bPart in ipairs(blastParts) do
 				local bModel = bPart:FindFirstAncestorOfClass("Model")
@@ -778,7 +781,7 @@ local function onRequestDashHit(player: Player, targetModel: Model?)
 					CombatService.ApplyDamage(
 						player,
 						bModel,
-						"DashHit_" .. tostring(os.clock()),
+						dashAttackId,
 						config.Damage,
 						config.Knockback,
 						false,
@@ -786,6 +789,10 @@ local function onRequestDashHit(player: Player, targetModel: Model?)
 					)
 				end
 			end
+
+			-- Enqueue the single dashAttackId for cleanup
+			activeAttacksTail = activeAttacksTail + 1
+			activeAttacks[activeAttacksTail] = { id = dashAttackId, expiry = os.clock() + 1 }
 
 			if enemiesStruck > 0 then
 				local addHeatEvent =
