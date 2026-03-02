@@ -268,13 +268,11 @@ local function createHitbox(
 	local hitboxCFrame = CFrame.lookAt(hitboxPosition, hitboxPosition + direction)
 	local hitboxSize = attackData.HitboxSize
 
-	-- Use OverlapParams for spatial query
-	local overlapParams = OverlapParams.new()
-	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-	overlapParams.FilterDescendantsInstances = { LocalPlayer.Character }
+	-- Reuse shared OverlapParams to avoid per-swing allocations
+	sharedOverlapParams.FilterDescendantsInstances = { LocalPlayer.Character }
 
 	-- Get parts in hitbox
-	local partsInBox = workspace:GetPartBoundsInBox(hitboxCFrame, hitboxSize, overlapParams)
+	local partsInBox = workspace:GetPartBoundsInBox(hitboxCFrame, hitboxSize, sharedOverlapParams)
 
 	-- Find unique characters hit
 	local charactersHit: { [Model]: boolean } = {}
@@ -1155,11 +1153,9 @@ local function handleFlamethrowerTick(dt)
 		local range = ftData.Range or 35
 		local angleCos = math.cos(math.rad((ftData.ConeAngle or 45) / 2))
 
-		local overlapParams = OverlapParams.new()
-		overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-		overlapParams.FilterDescendantsInstances = { char }
+		sharedOverlapParams.FilterDescendantsInstances = { char }
 
-		local candidates = workspace:GetPartBoundsInRadius(rootPart.Position, range, overlapParams)
+		local candidates = workspace:GetPartBoundsInRadius(rootPart.Position, range, sharedOverlapParams)
 		local hits = {}
 
 		local forward = rootPart.CFrame.LookVector
