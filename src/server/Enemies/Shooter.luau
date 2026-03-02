@@ -52,7 +52,7 @@ function Shooter:OnChaseOverride(targetPos: Vector3, distance: number): boolean
 	local fleeDist: number = config.FleeDistance or 8
 	local preferredDist: number = config.PreferredDistance or 20
 	local attackRange: number = config.AttackRange or 25
-	local now = tick()
+	local now = os.clock()
 
 	-- ── Retreat: player invaded our personal space ─────────────────
 	if distance < fleeDist then
@@ -168,7 +168,7 @@ function Shooter:OnAttackEnter()
 
 		-- I-frame check
 		local iframeExpiry = self._services.getIFrameExpiry(target)
-		if iframeExpiry and tick() < iframeExpiry then
+		if iframeExpiry and os.clock() < iframeExpiry then
 			self._services.blockDamage(target, self.Model, targetRoot.Position, attackDamage)
 			return
 		end

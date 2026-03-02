@@ -22,7 +22,7 @@ local SkillService = {
 	Name = "SkillService",
 }
 
--- Cooldown tracking: { [Player]: { [Slot]: tick() } }
+-- Cooldown tracking: { [Player]: { [Slot]: os.clock() } }
 local cooldowns = {}
 
 --[[
@@ -46,7 +46,7 @@ local function getCooldownRemaining(player: Player, slot: string): number
 
 	local lastUse = cooldowns[player][slot]
 	local cd = classSkills[slot].Cooldown
-	local remaining = cd - (tick() - lastUse)
+	local remaining = cd - (os.clock() - lastUse)
 
 	return math.max(0, remaining)
 end
@@ -122,7 +122,7 @@ local function onRequestSkill(player: Player, slot: string, target: Model?, aimP
 	if not cooldowns[player] then
 		cooldowns[player] = {}
 	end
-	cooldowns[player][slot] = tick()
+	cooldowns[player][slot] = os.clock()
 
 	executeSkill(player, configName, slot, skillData, target, aimPos)
 
@@ -160,7 +160,7 @@ function SkillService:Start()
 			if not cooldowns[player] then
 				cooldowns[player] = {}
 			end
-			cooldowns[player]["Skill1"] = tick()
+			cooldowns[player]["Skill1"] = os.clock()
 			-- Execute Phase 2
 			task.spawn(function()
 				ScrapperSkills.TripWireEnd(player, aimPos)

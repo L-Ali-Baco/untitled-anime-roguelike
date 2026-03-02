@@ -45,8 +45,8 @@ local eventCooldowns = {
 -- =========================================================
 local directorCredits = 0 -- Current credit balance
 local directorState = "Lull" -- "Ramp" | "Lull"
-local lullEndTime = 0 -- tick() when the current lull expires
-local lastSpawnTick = 0 -- tick() of the last credit-funded spawn
+local lullEndTime = 0 -- os.clock() when the current lull expires
+local lastSpawnTick = 0 -- os.clock() of the last credit-funded spawn
 
 -- References to other services (set in Start)
 local EnemyService = nil
@@ -59,7 +59,7 @@ local function calculateDifficulty(): number
 		return DirectorConfig.BaseDifficulty
 	end
 
-	local runTime = tick() - runStartTime
+	local runTime = os.clock() - runStartTime
 	local minutesElapsed = runTime / 60
 
 	local difficulty = DirectorConfig.BaseDifficulty + (minutesElapsed * DirectorConfig.DifficultyPerMinute)
@@ -440,7 +440,7 @@ local function onHeartbeat(deltaTime: number)
 		return
 	end
 
-	local now = tick()
+	local now = os.clock()
 
 	-- Throttle updates
 	if now - lastUpdateTime < DirectorConfig.UpdateInterval then
@@ -539,7 +539,7 @@ function DirectorService:GetRunTime(): number
 	if not isRunning then
 		return 0
 	end
-	return tick() - runStartTime
+	return os.clock() - runStartTime
 end
 
 --[[
@@ -553,7 +553,7 @@ end
     Start a new run (resets difficulty)
 ]]
 function DirectorService:StartRun()
-	runStartTime = tick()
+	runStartTime = os.clock()
 	currentDifficulty = DirectorConfig.BaseDifficulty
 	isRunning = true
 	lastUpdateTime = 0
@@ -595,7 +595,7 @@ function DirectorService:EndRun()
 	directorState = "Lull"
 	lullEndTime = 0
 	lastSpawnTick = 0
-	local runTime = tick() - runStartTime
+	local runTime = os.clock() - runStartTime
 	print(
 		"[DirectorService] RUN ENDED - Duration:",
 		string.format("%.1f", runTime),
@@ -631,7 +631,7 @@ function DirectorService:SetDifficulty(difficulty: number)
 	-- diff = base + (mins * rate)
 	-- mins = (diff - base) / rate
 	local targetMinutes = (currentDifficulty - DirectorConfig.BaseDifficulty) / DirectorConfig.DifficultyPerMinute
-	runStartTime = tick() - (targetMinutes * 60)
+	runStartTime = os.clock() - (targetMinutes * 60)
 
 	print("[DirectorService] Difficulty manually set to", currentDifficulty)
 end
@@ -652,10 +652,10 @@ local function setupDebugCommands()
 				end
 			elseif cmd == "/elite" then
 				print("Forcing Elite Spawn...")
-				tryEliteSpawn(100, tick(), true) -- Force spawn
+				tryEliteSpawn(100, os.clock(), true) -- Force spawn
 			elseif cmd == "/horde" then
 				print("Forcing Horde Wave...")
-				tryHordeWave(100, tick(), true) -- Force wave
+				tryHordeWave(100, os.clock(), true) -- Force wave
 			elseif cmd == "/reset" then
 				DirectorService:StartRun()
 			elseif cmd == "/time" then

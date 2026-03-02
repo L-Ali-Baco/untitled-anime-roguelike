@@ -16,6 +16,28 @@ local CombatService = require(script.Parent.Parent.Services.CombatService)
 
 local ScrapperSkills = {}
 
+-- OPTIMIZATION: Cache player characters so Heartbeat trips don't allocate a new table each frame.
+local cachedPlayerCharacters: { Model } = {}
+local function updateCachedCharacters()
+	local newCache = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			table.insert(newCache, p.Character)
+		end
+	end
+	cachedPlayerCharacters = newCache
+end
+Players.PlayerRemoving:Connect(updateCachedCharacters)
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(updateCachedCharacters)
+	player.CharacterRemoving:Connect(updateCachedCharacters)
+end)
+for _, player in ipairs(Players:GetPlayers()) do
+	player.CharacterAdded:Connect(updateCachedCharacters)
+	player.CharacterRemoving:Connect(updateCachedCharacters)
+end
+updateCachedCharacters()
+
 -- State tracking for Trip-Wires
 local activeTripWires = {}
 
@@ -89,7 +111,7 @@ function ScrapperSkills.TripWireSpool(player: Player, skillData: any, target: Mo
 	activeTripWires[player] = {
 		StartNode = startNode,
 		StartPos = aimPos,
-		StartTime = tick(),
+		StartTime = os.clock(),
 	}
 end
 
@@ -181,14 +203,9 @@ function ScrapperSkills.TripWireEnd(player: Player, aimPos: Vector3?)
 		-- Heartbeat connection to check for enemies
 		local connection
 		connection = RunService.Heartbeat:Connect(function()
-			-- Exclude players
-			local ignoreList = {}
-			for _, p in ipairs(Players:GetPlayers()) do
-				if p.Character then
-					table.insert(ignoreList, p.Character)
-				end
-			end
-			wireParams.FilterDescendantsInstances = ignoreList
+			-- Exclude players using cached list (avoids per-frame allocation)
+			wireParams.FilterType = Enum.RaycastFilterType.Exclude
+			wireParams.FilterDescendantsInstances = cachedPlayerCharacters
 
 			-- Detect intersections
 			local hitParts = workspace:GetPartBoundsInBox(wireVisual.CFrame, wireVisual.Size, wireParams)
@@ -302,7 +319,8 @@ function ScrapperSkills.TripWireEnd(player: Player, aimPos: Vector3?)
 					-- AOE Damage
 					local hitRadius = SkillConfig.Scrapper.Skill1.Radius
 					local blastParams = OverlapParams.new()
-					blastParams.FilterDescendantsInstances = ignoreList
+					blastParams.FilterType = Enum.RaycastFilterType.Exclude
+					blastParams.FilterDescendantsInstances = cachedPlayerCharacters
 					local blastParts = workspace:GetPartBoundsInRadius(explosionPos, hitRadius, blastParams)
 
 					local Remotes = require(game:GetService("ReplicatedStorage").Shared.Remotes)
@@ -320,7 +338,7 @@ function ScrapperSkills.TripWireEnd(player: Player, aimPos: Vector3?)
 							CombatService.ApplyDamage(
 								player,
 								bModel,
-								"TripWire_" .. tostring(tick()),
+								"TripWire_" .. tostring(os.clock()),
 								SkillConfig.Scrapper.Skill1.Damage,
 								SkillConfig.Scrapper.Skill1.Knockback,
 								false

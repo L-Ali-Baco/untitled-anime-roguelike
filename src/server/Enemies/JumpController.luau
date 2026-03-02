@@ -378,7 +378,7 @@ function JumpController.DoLedgeJump(enemy: any, moveDir: Vector3, jumpPower: num
 
 	-- ── State transition ──────────────────────────────────────────────────────
 	enemy.State = AIState.Jumping
-	enemy._fallingGraceEnd = tick() + 0.05 -- brief grace before landing check engages
+	enemy._fallingGraceEnd = os.clock() + 0.05 -- brief grace before landing check engages
 	enemy.IsMoving = false
 
 	enemy._services.fireEnemyStateChanged(enemy.Model, AIState.Jumping)
@@ -437,7 +437,7 @@ function JumpController.DoGapLeap(enemy: any, moveDir: Vector3, dropDepth: numbe
 	-- ── State transition ──────────────────────────────────────────────────────
 	-- Record when we entered Falling so the landing check grace period applies.
 	enemy.State = AIState.Falling
-	enemy._fallingGraceEnd = tick() + FALL_GRACE_PERIOD
+	enemy._fallingGraceEnd = os.clock() + FALL_GRACE_PERIOD
 	enemy.IsMoving = false
 
 	enemy._services.fireEnemyStateChanged(enemy.Model, AIState.Falling)

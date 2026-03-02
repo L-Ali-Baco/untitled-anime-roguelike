@@ -370,7 +370,7 @@ function Keg:_detonate()
 
 		-- I-frame check: player dashed out of the blast window in time
 		local iframeExpiry = self._services.getIFrameExpiry(player)
-		if iframeExpiry and tick() < iframeExpiry then
+		if iframeExpiry and os.clock() < iframeExpiry then
 			self._services.blockDamage(player, self.Model, rootPos, damage)
 			continue
 		end

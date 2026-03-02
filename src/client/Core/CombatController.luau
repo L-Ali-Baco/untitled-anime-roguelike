@@ -268,13 +268,11 @@ local function createHitbox(
 	local hitboxCFrame = CFrame.lookAt(hitboxPosition, hitboxPosition + direction)
 	local hitboxSize = attackData.HitboxSize
 
-	-- Use OverlapParams for spatial query
-	local overlapParams = OverlapParams.new()
-	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-	overlapParams.FilterDescendantsInstances = { LocalPlayer.Character }
+	-- Reuse shared OverlapParams to avoid per-swing allocations
+	sharedOverlapParams.FilterDescendantsInstances = { LocalPlayer.Character }
 
 	-- Get parts in hitbox
-	local partsInBox = workspace:GetPartBoundsInBox(hitboxCFrame, hitboxSize, overlapParams)
+	local partsInBox = workspace:GetPartBoundsInBox(hitboxCFrame, hitboxSize, sharedOverlapParams)
 
 	-- Find unique characters hit
 	local charactersHit: { [Model]: boolean } = {}
@@ -811,7 +809,7 @@ local function performRangedAttack()
 			if isShredShot then
 				-- Reset heat and add a 2.5 second cooldown before it can build again
 				LocalPlayer:SetAttribute("HeatCharge", 0)
-				LocalPlayer:SetAttribute("HeatResetTime", tick() + 2.5)
+				LocalPlayer:SetAttribute("HeatResetTime", os.clock() + 2.5)
 			end
 
 			-- Light hitstop and screen shake for feedback
@@ -1041,7 +1039,7 @@ local function handleFlamethrowerTick(dt)
 	if ftData.VoxelEnabled then
 		for _ = 1, (ftData.VoxelCountPerFrame or 6) do
 			-- Subtle Turbulence Path (reduced from 0.4 to 0.15)
-			local angle = tick() * 12 + (math.random() * 2)
+			local angle = os.clock() * 12 + (math.random() * 2)
 			local turbX = math.sin(angle) * 0.15
 			local turbY = math.cos(angle * 0.7) * 0.15
 
@@ -1155,11 +1153,9 @@ local function handleFlamethrowerTick(dt)
 		local range = ftData.Range or 35
 		local angleCos = math.cos(math.rad((ftData.ConeAngle or 45) / 2))
 
-		local overlapParams = OverlapParams.new()
-		overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-		overlapParams.FilterDescendantsInstances = { char }
+		sharedOverlapParams.FilterDescendantsInstances = { char }
 
-		local candidates = workspace:GetPartBoundsInRadius(rootPart.Position, range, overlapParams)
+		local candidates = workspace:GetPartBoundsInRadius(rootPart.Position, range, sharedOverlapParams)
 		local hits = {}
 
 		local forward = rootPart.CFrame.LookVector

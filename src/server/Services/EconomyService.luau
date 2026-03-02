@@ -275,7 +275,7 @@ function EconomyService:_spawnOrbs(deathPosition: Vector3, totalGold: number)
 		table.insert(activeOrbs, {
 			Part = part,
 			GoldValue = goldPerOrb,
-			SpawnTime = tick(),
+			SpawnTime = os.clock(),
 		})
 	end
 end
@@ -340,7 +340,7 @@ function EconomyService:Start()
 	--      velocity  = direction * ORB_PULL_SPEED    (constant speed, no acceleration)
 	--      Direct assignment (NOT +=): prevents speed accumulation over frames.
 	RunService.Heartbeat:Connect(function(_dt: number)
-		local now = tick()
+		local now = os.clock()
 		local i = #activeOrbs
 		while i >= 1 do
 			local entry = activeOrbs[i]

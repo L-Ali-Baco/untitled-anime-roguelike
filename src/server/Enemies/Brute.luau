@@ -88,7 +88,7 @@ function Brute:OnChaseOverride(targetPos: Vector3, distance: number): boolean
 		return false
 	end
 
-	local now = tick()
+	local now = os.clock()
 	-- Must be off attack cooldown before considering any special
 	if now - self.LastAttackTime < (config.AttackCooldown or 2.0) then
 		return false
@@ -261,9 +261,9 @@ function Brute:_doLeapAttack(attackData: { [string]: any })
 	end
 
 	-- Ease-out rise (fast start, slows at peak)
-	local launchStart = tick()
+	local launchStart = os.clock()
 	while true do
-		local t = math.clamp((tick() - launchStart) / launchDuration, 0, 1)
+		local t = math.clamp((os.clock() - launchStart) / launchDuration, 0, 1)
 		if t >= 1 then
 			break
 		end
@@ -306,9 +306,9 @@ function Brute:_doLeapAttack(attackData: { [string]: any })
 	end
 
 	local flightStartPos = rootPart.Position
-	local flightStart = tick()
+	local flightStart = os.clock()
 	while true do
-		local t = math.clamp((tick() - flightStart) / flightDuration, 0, 1)
+		local t = math.clamp((os.clock() - flightStart) / flightDuration, 0, 1)
 		if t >= 1 then
 			break
 		end
@@ -383,7 +383,7 @@ function Brute:_doLeapAttack(attackData: { [string]: any })
 		end
 
 		local iframeExpiry = self._services.getIFrameExpiry(player)
-		if iframeExpiry and tick() < iframeExpiry then
+		if iframeExpiry and os.clock() < iframeExpiry then
 			self._services.blockDamage(player, self.Model, targetRoot.Position, attackDamage)
 			continue
 		end
@@ -522,7 +522,7 @@ function Brute:_doChargeAttack(attackData: { [string]: any })
 		end
 
 		local iframeExpiry = self._services.getIFrameExpiry(player)
-		if iframeExpiry and tick() < iframeExpiry then
+		if iframeExpiry and os.clock() < iframeExpiry then
 			self._services.blockDamage(player, self.Model, targetRoot.Position, damage)
 			continue
 		end

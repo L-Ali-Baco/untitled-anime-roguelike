@@ -11,6 +11,40 @@ local MathUtil = require(ReplicatedStorage.Shared.Lib.MathUtil)
 
 local StatLib = {}
 
+-- Cache parsed inventories to avoid O(N) GetAttributes() allocation on every frame.
+-- [Player] = { [ItemKey] = count }  — invalidated on any Item_ attribute change.
+local inventoryCache: { [Player]: { [string]: number } } = {}
+local cacheConnections: { [Player]: RBXScriptConnection } = {}
+
+local function _getInventory(player: Player): { [string]: number }
+	if inventoryCache[player] then
+		return inventoryCache[player]
+	end
+	local inventory: { [string]: number } = {}
+	for k, v in pairs(player:GetAttributes()) do
+		if string.sub(k, 1, 5) == "Item_" then
+			inventory[string.sub(k, 6)] = v
+		end
+	end
+	inventoryCache[player] = inventory
+	if not cacheConnections[player] then
+		cacheConnections[player] = player.AttributeChanged:Connect(function(attr)
+			if string.sub(attr, 1, 5) == "Item_" then
+				inventoryCache[player] = nil
+			end
+		end)
+	end
+	return inventory
+end
+
+Players.PlayerRemoving:Connect(function(player)
+	inventoryCache[player] = nil
+	if cacheConnections[player] then
+		cacheConnections[player]:Disconnect()
+		cacheConnections[player] = nil
+	end
+end)
+
 -- Hard caps applied after all item math resolves.
 -- Prevents additive stats from exceeding physically meaningful values.
 local STAT_CAPS: { [string]: { min: number?, max: number? } } = {
@@ -60,26 +94,20 @@ function StatLib:GetStat(
 			end
 		end
 	else
-		-- FALLBACK: Iterate player attributes (O(N) attributes)
-		-- This scales O(N) with player items instead of O(N) with total game items.
-		local attributes = player:GetAttributes()
-		for attributeName, value in pairs(attributes) do
-			if string.sub(attributeName, 1, 5) == "Item_" then
-				local itemKey = string.sub(attributeName, 6)
-				local item = ItemRegistry.Pool[itemKey]
-
-				if item and item.Effects then
-					local count = value
-					for _, effect in pairs(item.Effects) do
-						if effect.Stat == statName then
-							if effect.Type == "Additive" then
-								additiveBonus += effect.Value * count
-							elseif effect.Type == "Multiplier" then
-								multiplierBonus += effect.Value * count
-							elseif effect.Type == "Hyperbolic" then
-								local cap = effect.Cap or (effect.Value * 5)
-								additiveBonus += MathUtil.HyperbolicScale(count, effect.Value, cap)
-							end
+		-- OPTIMIZATION: Use cached inventory (invalidated on Item_ attribute change)
+		-- Avoids O(N) GetAttributes() allocation on every stat recalculation.
+		for itemKey, count in pairs(_getInventory(player)) do
+			local item = ItemRegistry.Pool[itemKey]
+			if item and item.Effects then
+				for _, effect in pairs(item.Effects) do
+					if effect.Stat == statName then
+						if effect.Type == "Additive" then
+							additiveBonus += effect.Value * count
+						elseif effect.Type == "Multiplier" then
+							multiplierBonus += effect.Value * count
+						elseif effect.Type == "Hyperbolic" then
+							local cap = effect.Cap or (effect.Value * 5)
+							additiveBonus += MathUtil.HyperbolicScale(count, effect.Value, cap)
 						end
 					end
 				end

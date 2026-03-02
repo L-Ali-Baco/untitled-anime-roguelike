@@ -43,8 +43,11 @@ local playerLastAttackId: { [Player]: string } = {}
 
 -- Track hits per attack to prevent duplicate damage
 local attackHitTargets: { [string]: { [Model]: boolean } } = {}
--- OPTIMIZATION: Centralized queue for attack cleanup to reduce scheduler overhead
-local activeAttacks: { { id: string, expiry: number } } = {}
+-- OPTIMIZATION: O(1) FIFO queue for attack cleanup using head/tail pointers.
+-- table.move (O(n)) replaced with pointer advance; pointers reset when queue drains.
+local activeAttacks: { [number]: { id: string, expiry: number } } = {}
+local activeAttacksHead = 1
+local activeAttacksTail = 0
 
 -- Track combo state per player to prevent sequence exploits (e.g. skipping to attack 3)
 local playerComboState: { [Player]: { CurrentIndex: number, LastAttackTime: number } } = {}
@@ -132,7 +135,7 @@ local function validateAttack(
 	-- Rate limiting (anti-cheat)
 	-- IMPORTANT: Skip rate limit if this is the same attack (AOE hitting multiple targets)
 	-- Multiple hits with the same attackId are allowed within the same swing
-	local now = tick()
+	local now = os.clock()
 	local lastAttack = playerLastAttack[player] or 0
 	local lastAttackId = playerLastAttackId[player]
 
@@ -250,8 +253,8 @@ local function applyKnockback(attacker: Model, target: Model, knockbackForce: nu
 
 	-- Calculate knockback velocity (smaller values work better with Humanoid)
 	-- knockbackForce is typically 5-12, so multiply by 2-3 for reasonable push
-	local knockbackSpeed = knockbackForce * 2.5
-	local upwardPop = 3 -- Small upward component for visual "hit" feel
+	local knockbackSpeed = knockbackForce * CombatConfig.Knockback.SpeedMultiplier
+	local upwardPop = CombatConfig.Knockback.UpwardForce -- Small upward component for visual "hit" feel
 
 	local knockbackVelocity = direction * knockbackSpeed + Vector3.new(0, upwardPop, 0)
 
@@ -503,7 +506,7 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 	-- Update last attack time and ID (Close the rate limit window)
 	local lastAttackId = playerLastAttackId[player]
 	if attackId ~= lastAttackId then
-		playerLastAttack[player] = tick()
+		playerLastAttack[player] = os.clock()
 		playerLastAttackId[player] = attackId
 
 		-- Update Combo State
@@ -511,12 +514,12 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 			playerComboState[player] = { CurrentIndex = 0, LastAttackTime = 0 }
 		end
 		playerComboState[player].CurrentIndex = attackIndex
-		playerComboState[player].LastAttackTime = tick()
+		playerComboState[player].LastAttackTime = os.clock()
 	end
 
-	-- Cleanup attack hit tracking after a short delay
-	-- OPTIMIZATION: Use centralized queue instead of task.delay to reduce scheduler overhead
-	table.insert(activeAttacks, { id = attackId, expiry = tick() + 1 })
+	-- Enqueue for cleanup (O(1) tail-append)
+	activeAttacksTail = activeAttacksTail + 1
+	activeAttacks[activeAttacksTail] = { id = attackId, expiry = os.clock() + 1 }
 end
 
 -- ============================================================================
@@ -545,7 +548,7 @@ local function validateRangedAttack(player: Player, targetModel: Model?, hitPosi
 	end
 
 	-- Rate limiting (anti-cheat)
-	local now = tick()
+	local now = os.clock()
 	local lastRangedAttack = playerLastRangedAttack[player] or 0
 	local minInterval = (ClassConfig.Server.MinRangedInterval or 0.08) * 0.9 -- 10% grace period
 	if now - lastRangedAttack < minInterval then
@@ -640,7 +643,7 @@ local function onRequestRangedHit(
 	end
 
 	-- Update last attack time
-	playerLastRangedAttack[player] = tick()
+	playerLastRangedAttack[player] = os.clock()
 
 	-- If no target, nothing more to do (miss)
 	if not targetModel then
@@ -718,8 +721,9 @@ local function onRequestRangedHit(
 	end
 
 	-- Cleanup attack hit tracking after a short delay
-	-- OPTIMIZATION: Use centralized queue instead of task.delay to reduce scheduler overhead
-	table.insert(activeAttacks, { id = attackId, expiry = tick() + 0.5 })
+	-- Enqueue for cleanup (O(1) tail-append)
+	activeAttacksTail = activeAttacksTail + 1
+	activeAttacks[activeAttacksTail] = { id = attackId, expiry = os.clock() + 0.5 }
 end
 
 --[[
@@ -753,6 +757,9 @@ local function onRequestDashHit(player: Player, targetModel: Model?)
 			local blastParts = workspace:GetPartBoundsInRadius(targetRoot.Position, config.AOERadius, cachedOverlapParams)
 			local hitEnemies = {}
 			local enemiesStruck = 0
+			-- FIX: Generate attackId once per dash, not per target.
+			-- Per-target IDs were never enqueued for cleanup → memory leak in attackHitTargets.
+			local dashAttackId = "DashHit_" .. tostring(os.clock())
 
 			for _, bPart in ipairs(blastParts) do
 				local bModel = bPart:FindFirstAncestorOfClass("Model")
@@ -774,7 +781,7 @@ local function onRequestDashHit(player: Player, targetModel: Model?)
 					CombatService.ApplyDamage(
 						player,
 						bModel,
-						"DashHit_" .. tostring(tick()),
+						dashAttackId,
 						config.Damage,
 						config.Knockback,
 						false,
@@ -782,6 +789,10 @@ local function onRequestDashHit(player: Player, targetModel: Model?)
 					)
 				end
 			end
+
+			-- Enqueue the single dashAttackId for cleanup
+			activeAttacksTail = activeAttacksTail + 1
+			activeAttacks[activeAttacksTail] = { id = dashAttackId, expiry = os.clock() + 1 }
 
 			if enemiesStruck > 0 then
 				local addHeatEvent =
@@ -811,40 +822,26 @@ function CombatService:Start()
 	print("[CombatService] Starting...")
 
 	-- Start cleanup loop
-	-- OPTIMIZATION: Batch cleanup operations to reduce scheduler overhead
+	-- OPTIMIZATION: O(1) FIFO drain — advance head pointer instead of table.move shift.
 	RunService.Heartbeat:Connect(function()
-		-- Skip when nothing to clean up (avoids busy-loop between fights)
-		if #activeAttacks == 0 then
-			return
+		if activeAttacksHead > activeAttacksTail then
+			return -- queue empty
 		end
-		local now = tick()
-		local removeCount = 0
-
-		-- Count how many items to remove (FIFO)
-		for _, entry in ipairs(activeAttacks) do
-			if now >= entry.expiry then
-				-- Cleanup hit tracking data
+		local now = os.clock()
+		while activeAttacksHead <= activeAttacksTail do
+			local entry = activeAttacks[activeAttacksHead]
+			if entry and now >= entry.expiry then
 				attackHitTargets[entry.id] = nil
-				removeCount += 1
+				activeAttacks[activeAttacksHead] = nil -- clear reference
+				activeAttacksHead = activeAttacksHead + 1
 			else
-				-- If oldest entry hasn't expired, newer ones won't either (assuming FIFO insertion)
-				break
+				break -- oldest hasn't expired; newer won't have either
 			end
 		end
-
-		if removeCount > 0 then
-			local newSize = #activeAttacks - removeCount
-			if newSize > 0 then
-				-- Shift remaining items to the front (O(n) instead of O(k*n))
-				table.move(activeAttacks, removeCount + 1, #activeAttacks, 1)
-				-- Clear the old slots at the end
-				for i = newSize + 1, #activeAttacks do
-					activeAttacks[i] = nil
-				end
-			else
-				-- List is empty, just clear it
-				table.clear(activeAttacks)
-			end
+		-- Reset pointers when queue fully drains to prevent index growth
+		if activeAttacksHead > activeAttacksTail then
+			activeAttacksHead = 1
+			activeAttacksTail = 0
 		end
 	end)
 

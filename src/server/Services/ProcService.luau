@@ -41,7 +41,7 @@ local procCooldowns: { [Player]: { [string]: number } } = {}
 local PROC_COOLDOWN = 0.25
 
 local function checkAndSetProcCooldown(player: Player, procId: string): boolean
-	local now = tick()
+	local now = os.clock()
 	if not procCooldowns[player] then
 		procCooldowns[player] = {}
 	end
