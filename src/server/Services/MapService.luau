@@ -67,30 +67,33 @@ function MapService:LoadMap(mapName: string)
 		currentMapModel.Parent = Workspace
 	end
 
-	-- Cache points using CollectionService and Tags
-	-- This assumes map creator tagged them correctly, OR named them correctly
-	-- We support both Tag and Name for robustness
-	for _, desc in currentMapModel:GetDescendants() do
-		if desc:IsA("BasePart") then
-			-- Enemy Spawns
-			if CollectionService:HasTag(desc, MapConfig.Tags.SpawnPoint) or desc.Name == MapConfig.Tags.SpawnPoint then
-				table.insert(enemySpawns, desc)
-				desc.Transparency = 1 -- Hide spawners
-			end
+	-- Cache spawn points from the loaded map model.
+	-- If the map wasn't found, currentMapModel is nil — skip the scan entirely.
+	-- GetRandomEnemySpawn / GetPlayerSpawn return procedural fallback positions when
+	-- the spawn tables are empty, so the game still runs without a map asset.
+	if currentMapModel then
+		for _, desc in currentMapModel:GetDescendants() do
+			if desc:IsA("BasePart") then
+				-- Enemy Spawns
+				if CollectionService:HasTag(desc, MapConfig.Tags.SpawnPoint) or desc.Name == MapConfig.Tags.SpawnPoint then
+					table.insert(enemySpawns, desc)
+					desc.Transparency = 1 -- Hide spawners
+				end
 
-			-- Chest Spawns
-			if CollectionService:HasTag(desc, MapConfig.Tags.ChestSpawn) or desc.Name == MapConfig.Tags.ChestSpawn then
-				table.insert(chestSpawns, desc)
-				desc.Transparency = 1
-			end
+				-- Chest Spawns
+				if CollectionService:HasTag(desc, MapConfig.Tags.ChestSpawn) or desc.Name == MapConfig.Tags.ChestSpawn then
+					table.insert(chestSpawns, desc)
+					desc.Transparency = 1
+				end
 
-			-- Player Spawns
-			if
-				CollectionService:HasTag(desc, MapConfig.Tags.PlayerSpawn)
-				or desc.Name == MapConfig.Tags.PlayerSpawn
-			then
-				table.insert(playerSpawns, desc)
-				desc.Transparency = 1
+				-- Player Spawns
+				if
+					CollectionService:HasTag(desc, MapConfig.Tags.PlayerSpawn)
+					or desc.Name == MapConfig.Tags.PlayerSpawn
+				then
+					table.insert(playerSpawns, desc)
+					desc.Transparency = 1
+				end
 			end
 		end
 	end

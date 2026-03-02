@@ -77,11 +77,11 @@ local ENEMY_CLASS_LOADERS: { [string]: () -> any } = {
 	Brute = function()
 		return require(script.Parent.Parent.Enemies.Brute)
 	end,
-	Shooter = function()
-		return require(script.Parent.Parent.Enemies.Shooter)
+	HexCaster = function()
+		return require(script.Parent.Parent.Enemies.HexCaster)
 	end,
-	Minion = function()
-		return require(script.Parent.Parent.Enemies.Minion)
+	BogShambler = function()
+		return require(script.Parent.Parent.Enemies.BogShambler)
 	end,
 	MossFrog = function()
 		return require(script.Parent.Parent.Enemies.MossFrog)
@@ -337,7 +337,7 @@ end
 function EnemyService:_createPlaceholderModel(enemyType: string, position: Vector3): Model
 	local COLOR_MAP = {
 		Brute = Color3.fromRGB(200, 50, 50),
-		Shooter = Color3.fromRGB(200, 200, 50),
+		HexCaster = Color3.fromRGB(160, 60, 220), -- Purple — arcane caster
 		MossFrog = Color3.fromRGB(60, 140, 60),
 		Keg = Color3.fromRGB(255, 120, 0), -- Bright orange — visually distinct bomber
 	}
@@ -466,8 +466,8 @@ function EnemyService:RegisterEnemy(enemyModel: Model, enemyType: string?): any?
 	local typeKey = enemyType or enemyModel.Name
 	local config = EnemyConfig.Types[typeKey]
 	if not config then
-		config = EnemyConfig.Types.Minion
-		typeKey = "Minion"
+		config = EnemyConfig.Types.BogShambler
+		typeKey = "BogShambler"
 	end
 
 	local scaledConfig = self:_applyDirectorScaling(config, enemyModel)
@@ -510,33 +510,86 @@ end
 -- ============================================================
 
 local function setupDebugCommands()
-	-- Connect the chat handler for a single player.
-	-- Extracted so it can be called for players already in-game (Studio playtest)
-	-- as well as future joiners via PlayerAdded.
+	-- Short aliases for /enemy. Keys are lowercased, values are exact EnemyConfig.Types keys.
+	-- Handles "/enemy hex", "/enemy hex caster", "/enemy hexcaster", etc.
+	local ENEMY_ALIASES: { [string]: string } = {
+		hex = "HexCaster",
+		hexcaster = "HexCaster",
+		["hex caster"] = "HexCaster",
+		caster = "HexCaster",
+		brute = "Brute",
+		minion = "BogShambler", -- legacy alias; BogShambler replaced Minion
+		shambler = "BogShambler",
+		bog = "BogShambler",
+		bogshambler = "BogShambler",
+		["bog shambler"] = "BogShambler",
+		frog = "MossFrog",
+		mossfrog = "MossFrog",
+		["moss frog"] = "MossFrog",
+		keg = "Keg",
+		bomb = "Keg",
+	}
+
+	local function resolveEnemyType(rawInput: string): string?
+		-- 1. Try alias table first (handles short names and multi-word aliases)
+		local lower = string.lower(rawInput)
+		if ENEMY_ALIASES[lower] then
+			return ENEMY_ALIASES[lower]
+		end
+		-- 2. Case-insensitive scan of EnemyConfig.Types (catches exact full names)
+		for typeName in EnemyConfig.Types do
+			if string.lower(typeName) == lower then
+				return typeName
+			end
+		end
+		return nil
+	end
+
 	local function connectChatted(player: Player)
 		player.Chatted:Connect(function(msg: string)
 			local args = string.split(msg, " ")
 			local cmd = string.lower(args[1])
 
-			if cmd == "/enemy" then
-				local inputType = args[2] or "Minion"
-				local resolvedType: string? = nil
-				for typeName in EnemyConfig.Types do
-					if string.lower(typeName) == string.lower(inputType) then
-						resolvedType = typeName
-						break
+			if cmd ~= "/enemy" then
+				return
+			end
+
+			-- Join all remaining words so "/enemy hex caster" → "hex caster"
+			local inputParts: { string } = {}
+			for i = 2, #args do
+				if args[i] ~= "" then
+					inputParts[#inputParts + 1] = args[i]
+				end
+			end
+			local rawInput = table.concat(inputParts, " ")
+
+			if rawInput == "" then
+				-- No type given: print available types as a hint
+				local types: { string } = {}
+				for typeName, typeConfig in EnemyConfig.Types do
+					if typeConfig.SpawnWeight > 0 then
+						types[#types + 1] = typeName
 					end
 				end
-				if not resolvedType then
-					print("[EnemyService] Unknown type:", inputType)
-					return
-				end
-				local char = player.Character
-				if not char or not char.PrimaryPart then
-					return
-				end
-				local spawnPos = char.PrimaryPart.Position + char.PrimaryPart.CFrame.LookVector * 12
-				EnemyService:SpawnEnemy(resolvedType, spawnPos)
+				table.sort(types)
+				print("[EnemyService] Usage: /enemy <type>  |  Available: " .. table.concat(types, ", "))
+				return
+			end
+
+			local resolvedType = resolveEnemyType(rawInput)
+			if not resolvedType then
+				print(("[EnemyService] Unknown enemy type '%s'. Try /enemy for the list."):format(rawInput))
+				return
+			end
+
+			local char = player.Character
+			if not char or not char.PrimaryPart then
+				return
+			end
+			local spawnPos = char.PrimaryPart.Position + char.PrimaryPart.CFrame.LookVector * 12
+			local model = EnemyService:SpawnEnemy(resolvedType, spawnPos)
+			if model then
+				print(("[EnemyService] Spawned %s for %s"):format(resolvedType, player.Name))
 			end
 		end)
 	end

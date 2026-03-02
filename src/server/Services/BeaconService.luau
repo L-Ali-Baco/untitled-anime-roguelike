@@ -140,7 +140,7 @@ local function onHeartbeat(dt: number)
 					-- Spawn enemy near players but not exactly on them
 					local player = players[math.random(#players)]
 					local offset = Vector3.new(math.random(-20, 20), 0, math.random(-20, 20))
-					EnemyService:SpawnEnemy("Minion", player.Character.PrimaryPart.Position + offset)
+					EnemyService:SpawnEnemy("BogShambler", player.Character.PrimaryPart.Position + offset)
 				end
 			end
 		else

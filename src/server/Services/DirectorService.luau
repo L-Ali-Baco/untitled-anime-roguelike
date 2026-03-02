@@ -266,7 +266,7 @@ local function tryHordeWave(difficulty: number, now: number, force: boolean?): b
 			local offset = Vector3.new(math.cos(angle) * config.SpawnRadius, 0, math.sin(angle) * config.SpawnRadius)
 
 			local spawnPos = centerPos + offset
-			EnemyService:SpawnEnemy("Minion", spawnPos)
+			EnemyService:SpawnEnemy("BogShambler", spawnPos)
 		end
 
 		print("[DirectorService] HORDE SPAWNED:", enemyCount, "enemies")
@@ -397,20 +397,20 @@ local function updateCreditDirector(now: number)
 		spawnType = "Brute"
 		spawnCost = cfg.SpawnCosts.Elite
 	else
-		-- Weighted grunt table: Minions are most common, others flavour the mix
+		-- Weighted grunt table: BogShamblers are most common, others flavour the mix
 		local grunts = {
-			"Minion",
-			"Minion",
-			"Minion", -- 3/7 ≈ 43%
+			"BogShambler",
+			"BogShambler",
+			"BogShambler", -- 3/7 ≈ 43%
 			"MossFrog",
 			"MossFrog", -- 2/7 ≈ 29%
-			"Shooter", -- 1/7 ≈ 14%
+			"HexCaster", -- 1/7 ≈ 14%
 			"Brute", -- 1/7 ≈ 14% (low-cost "budget elite")
 		}
 		-- Block Brute if we can't afford the elite cost
 		local roll = grunts[math.random(#grunts)]
 		if roll == "Brute" and directorCredits < cfg.SpawnCosts.Elite then
-			roll = "Minion" -- downgrade to grunt
+			roll = "BogShambler" -- downgrade to grunt
 		end
 		spawnType = roll
 		spawnCost = if roll == "Brute" then cfg.SpawnCosts.Elite else cfg.SpawnCosts.Grunt

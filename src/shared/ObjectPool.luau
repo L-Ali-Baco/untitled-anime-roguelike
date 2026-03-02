@@ -73,6 +73,7 @@ export type ObjectPool = typeof(setmetatable(
 	{} :: {
 		_template: BasePart,
 		_expansionSize: number,
+		_maxIdleLimit: number,
 		_freeList: { BasePart },
 		_totalCreated: number,
 		_activeCount: number,
@@ -102,8 +103,13 @@ export type ObjectPool = typeof(setmetatable(
 	@param expansionSize number?    Parts to add per expansion batch when the
 	                                pool runs dry. Defaults to DEFAULT_EXPANSION_SIZE.
 	                                Tune upward if your pool frequently exhausts.
+
+	@param maxIdleLimit  number?    Maximum dormant parts to keep alive when culling.
+	                                Every 60 seconds the pool destroys free parts
+	                                beyond this cap to reclaim RAM. Defaults to
+	                                `initialSize` (never cull the original allocation).
 ]]
-function ObjectPool.new(template: BasePart, initialSize: number, expansionSize: number?): ObjectPool
+function ObjectPool.new(template: BasePart, initialSize: number, expansionSize: number?, maxIdleLimit: number?): ObjectPool
 	-- Validate inputs at construction time so bugs surface immediately,
 	-- not silently during a frame-critical GetPart() call at runtime.
 	assert(
@@ -125,6 +131,10 @@ function ObjectPool.new(template: BasePart, initialSize: number, expansionSize: 
 	-- Batch size for runtime expansion. Stored per-pool so different pools
 	-- can have different growth strategies.
 	self._expansionSize = expansionSize or DEFAULT_EXPANSION_SIZE
+
+	-- Idle ceiling for the Cull() background loop.
+	-- If the free list exceeds this count, excess parts are :Destroy()ed.
+	self._maxIdleLimit = maxIdleLimit or initialSize
 
 	-- The free list is a stack (LIFO array). We use table.insert/remove on
 	-- the END of the array, which is O(1) in Luau (no shifting required).
@@ -148,6 +158,16 @@ function ObjectPool.new(template: BasePart, initialSize: number, expansionSize: 
 	-- Pre-populate to initialSize. Done synchronously in the constructor so
 	-- the caller's first frame of heavy usage hits no allocation cost.
 	self:_expand(initialSize)
+
+	-- Background culling loop: every 60 seconds, destroy excess dormant parts
+	-- so a burst event (horde wave) that grew the pool doesn't permanently bloat RAM.
+	-- The loop checks the storage folder parent to detect pool destruction.
+	task.spawn(function()
+		while self._storageFolder and self._storageFolder.Parent do
+			task.wait(60)
+			self:Cull()
+		end
+	end)
 
 	return self :: ObjectPool
 end
@@ -406,6 +426,44 @@ function ObjectPool:GetStats(): { total: number, active: number, free: number }
 		active = self._activeCount, -- currently checked out
 		free = #self._freeList, -- available for immediate reuse
 	}
+end
+
+-- ── Public: Cull ─────────────────────────────────────────────────────────────
+
+--[[
+	ObjectPool:Cull()
+
+	Destroys free (dormant) parts that exceed _maxIdleLimit.
+
+	Call pattern: the background task.spawn loop fires this every 60 seconds.
+	Callers may also invoke it manually before memory-sensitive operations.
+
+	WHY we only cull the FREE list:
+	  Active parts are in use by callers and must not be touched. We only
+	  destroy parts that are parked underground and immediately available for
+	  re-issue. If demand spikes again after a cull, the pool re-expands
+	  normally via GetPart() — paying Clone() cost once per new burst.
+
+	Time complexity: O(excess) where excess = free - maxIdleLimit.
+]]
+function ObjectPool:Cull()
+	local idleCount = #self._freeList
+	local excess = idleCount - self._maxIdleLimit
+	if excess <= 0 then
+		return
+	end
+
+	-- Destroy from the TAIL of the free list (LIFO — most recently returned
+	-- parts, which are cold in cache and least likely to be needed next).
+	for _ = 1, excess do
+		local part = self._freeList[#self._freeList]
+		self._freeList[#self._freeList] = nil
+		part:Destroy()
+		self._totalCreated -= 1
+	end
+
+	-- Optional: diagnostic log (remove in production if too noisy).
+	-- print(string.format("[ObjectPool] '%s' culled %d parts (idle now %d).", self._template.Name, excess, self._maxIdleLimit))
 end
 
 -- ── Public: Destroy ───────────────────────────────────────────────────────────

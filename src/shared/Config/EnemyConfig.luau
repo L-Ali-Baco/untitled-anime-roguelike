@@ -24,26 +24,74 @@ return {
 	-- Enemy types
 	Types = {
 		--[[
-            Minion - Basic fodder enemy
-            Design: Swarm enemy, weak individually but spawns in groups
-            Behavior: Chase player, simple melee attack
+            BogShambler - Basic swarm fodder enemy (custom non-humanoid rig)
+            Design: Slow, shambling undead. Weak individually but spawns in groups.
+                    Non-humanoid rig: AnimationController + Motor6D skeleton.
+            Behavior: Chase player, plain melee attack (base _doStandardAttack).
+
+            STUDIO RIGGING GUIDE — how to make animations play on this rig:
+            ─────────────────────────────────────────────────────────────────
+            Roblox's Animator writes poses by updating Motor6D.Transform each frame.
+            WeldConstraint / Weld instances are physics-only; the Animator cannot
+            see or drive them. If your custom rig uses welds its limbs will not move.
+
+            Step-by-step fix:
+              1. In the Model hierarchy find every Weld / WeldConstraint between
+                 the root (HumanoidRootPart / "Torso") and child limbs.
+              2. Delete them.
+              3. For each limb add a Motor6D in the PARENT part:
+                    Motor6D.Part0 = parentPart
+                    Motor6D.Part1 = childLimb
+                    Motor6D.C0   = CFrame of the joint pivot in Part0 space
+                    Motor6D.C1   = CFrame of the joint pivot in Part1 space
+                    Motor6D.Name = e.g. "RightArm", "Head", etc.
+              4. Set the root part as the PrimaryPart of the Model.
+              5. Delete any Humanoid (BaseEnemy._setupAnimator does this at
+                 runtime, but removing it in Studio keeps the viewport clean).
+              6. Do NOT add an AnimationController in Studio — BaseEnemy creates
+                 one at runtime with the correct Animator child.
+              7. Export / save the model. The WalkAnimationId clip must be
+                 authored against this Motor6D skeleton (use the Roblox Animation
+                 Editor with the rig selected).
+
+            Animation priorities used by BogShambler:
+              • Walk   → Enum.AnimationPriority.Movement  (loop, auto play/stop)
+              • Attack → Enum.AnimationPriority.Action    (played by _doStandardAttack)
+            ─────────────────────────────────────────────────────────────────
         ]]
-		Minion = {
+		BogShambler = {
 			-- Spawn weighting (relative). Higher = spawns more often.
-			-- Total active weight: Minion(60) + Shooter(15) + MossFrog(15) + Brute(7) + Keg(3) = 100
+			-- Total active weight: BogShambler(60) + HexCaster(15) + MossFrog(15) + Brute(7) + Keg(3) = 100
 			SpawnWeight = 60,
 
 			-- Stats
 			Health = 30,
-			WalkSpeed = 14, -- Slower than player (18)
-			Damage = 5,
+			WalkSpeed = 10, -- Slower than Minion (14); shambling pace
+			Damage = 8, -- Per headbutt hit
 
 			-- AI behavior
 			AggroRange = 70, -- Detection range (aggressive swarm behavior)
-			AttackRange = 4, -- Studs to start attacking
-			AttackCooldown = 1.5, -- Seconds between attacks
-			AttackWindup = 0.3, -- Seconds before damage applies
-			AttackDuration = 0.6, -- Total attack animation time
+			AttackRange = 6, -- Studs to enter attack state (matches headbutt AoE radius)
+			AttackCooldown = 3.0, -- Seconds between headbutts (windup + hitstop + recovery ≈ 1.6 s)
+			AttackWindup = 0.3, -- Fallback only; headbutt uses HeadbuttWindup below
+			AttackDuration = 1.6, -- Fallback only; headbutt manages its own timing
+
+			-- Animation
+			WalkAnimationId = "rbxassetid://73141572263954", -- Shambling walk cycle
+
+			-- Headbutt attack
+			-- BogShambler:OnAttackEnter overrides _doStandardAttack entirely.
+			-- These values are read by _doHeadbuttAttack in BogShambler.luau.
+			HeadbuttAnimId = "rbxassetid://86362610167476", -- Leaping headbutt clip
+			HeadbuttWindup = 0.6, -- Seconds from clip start to the impact frame.
+			--                       To go frame-perfect: add a KeyframeMarker named
+			--                       "Impact" to the clip in the Animation Editor and
+			--                       swap task.wait(windup) for GetMarkerReachedSignal.
+			HeadbuttHitstop = 0.5, -- Seconds the animation freezes at impact (Speed = 0).
+			HeadbuttRecovery = 0.5, -- Seconds of recovery animation after the freeze.
+			HeadbuttDamage = 12, -- Flat damage dealt on impact.
+			HeadbuttRadius = 6, -- AoE hit radius (studs), centered 3 studs in front of HRP.
+			HeadbuttKnockback = 18, -- Impulse magnitude away from the shambler.
 
 			-- Movement
 			ChaseSpeedMultiplier = 1.0, -- Speed multiplier when chasing
@@ -244,40 +292,57 @@ return {
 		},
 
 		--[[
-            Shooter - Ranged enemy
-            Design: Stays at range, fires projectiles
-            Behavior: Keep distance, shoot at player
+            HexCaster - Airborne ranged caster
+            Design: Hovers HOVER_HEIGHT studs off the ground. No Humanoid — uses
+                    AnimationController/Animator. Orbits the player at PreferredDistance
+                    and fires a hex bolt projectile. Forces the player to use vertical
+                    AoE or long-range abilities; cannot be kited on the ground.
+            Behavior: Hover → orbit player at range → fire hex bolt → repeat.
+                      Retreats when player closes inside FleeDistance.
+            NOTE: Requires Enemies/HexCaster.luau + entry in EnemyService ENEMY_CLASS_LOADERS.
         ]]
-		Shooter = {
-			-- Mid-tier ranged harasser.
+		HexCaster = {
+			-- Same weight as the Shooter it replaces.
+			-- Total active weight: BogShambler(60) + HexCaster(15) + MossFrog(15) + Brute(7) + Keg(3) = 100
 			SpawnWeight = 15,
 
-			Health = 20,
-			WalkSpeed = 12,
-			Damage = 8,
+			Health = 35, -- Squishier than Shooter: it keeps itself at range, so it needs less buffer
+			WalkSpeed = 11, -- Slow lateral drift — it's a caster, not a runner
+			Damage = 12, -- Slightly higher than Shooter: each bolt is deliberate
 
-			AggroRange = 90, -- Longest range - ranged enemies spot you first
-			AttackRange = 25, -- Fires from far away
-			AttackCooldown = 2.0,
-			AttackWindup = 0.4,
-			AttackDuration = 0.5,
+			AggroRange = 120, -- Spots players from very far — ranged enemies should engage early
+			AttackRange = 50, -- Opens fire from long range; forces player to use gap-closers
+			AttackCooldown = 2.8, -- Deliberate casting pace
+			AttackWindup = 0.3, -- Bolt fires ~60% through the 0.48 s cast clip
+			AttackDuration = 0.55, -- Slightly longer than 0.48 s so animation fully completes
 
 			-- Ranged-specific
-			ProjectileSpeed = 50, -- Studs per second
-			PreferredDistance = 20, -- Tries to stay this far from player
-			FleeDistance = 8, -- If player gets this close, retreat
+			ProjectileSpeed = 45, -- Studs per second; slightly slower than a gun bolt, more magical
+			PreferredDistance = 38, -- Orbits ~38 studs away; well inside AttackRange
+			FleeDistance = 20, -- Retreats if player closes to this range
 
-			ChaseSpeedMultiplier = 1.2, -- Faster when fleeing
-			StopDistanceFromTarget = 18,
+			-- Animation IDs
+			-- IdleAnimationId: hardcoded in HexCaster.luau (rbxassetid://105855271459399)
+			CastAnimationId = "rbxassetid://128236108325891", -- standard wand cast, 0.48 s
+			HeavyBeamAnimId = "rbxassetid://76748423824936", -- channel wind-up, 0.88 s
 
-			HitstunDuration = 0.4, -- Easy to interrupt
-			KnockbackResistance = 0,
+			-- Hex-Beam heavy attack
+			HeavyAttackCooldown = 10, -- seconds between Hex-Beam uses
+			HeavyAttackDamage = 30, -- burst damage on beam contact
+			HeavyBeamLength = 60, -- studs forward from HRP
+			HeavyBeamWidth = 5, -- full width/height of the linear hitbox
 
-			XPValue = 10,
+			ChaseSpeedMultiplier = 1.0,
+			StopDistanceFromTarget = 0, -- Orbit logic in OnChaseOverride handles stopping
+
+			HitstunDuration = 0.45, -- Easy to interrupt mid-cast
+			KnockbackResistance = 0, -- Airborne — knockback sends it flying
+
+			XPValue = 12,
 			DropChance = 0.15,
 
-			HealthBarOffset = Vector3.new(0, 3, 0),
-			NameDisplayed = false,
+			HealthBarOffset = Vector3.new(0, 9, 0), -- Higher: floats well above ground
+			NameDisplayed = true,
 		},
 
 		--[[

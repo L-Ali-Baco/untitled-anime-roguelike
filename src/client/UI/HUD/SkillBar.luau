@@ -83,10 +83,7 @@ local function Tooltip(scope, props)
 			-- Stats
 			scope:New("TextLabel")({
 				LayoutOrder = 3,
-				Text = Computed(scope, function(use)
-					local cd = use(props.Cooldown) or 0
-					return string.format("Cooldown: %.1fs", cd)
-				end),
+				Text = props.CooldownText,
 				TextColor3 = Color3.fromRGB(100, 200, 255),
 				Font = Enum.Font.GothamBold,
 				TextSize = 11,
@@ -167,6 +164,24 @@ local function SkillSlot(scope, props)
 		return string.format("%.1f", remaining)
 	end)
 
+	-- All three Tooltip string props are pre-baked here in SkillSlot so that
+	-- Tooltip never needs to create Computeds that use() external state.
+	-- This is the correct fix for Fusion 0.3 possiblyOutlives warnings:
+	-- every Computed that depends on reactive state must be created in the
+	-- same scope context that owns that state.
+	local cooldownText = Computed(scope, function(use)
+		local cd = use(cooldownDuration) or 0
+		return string.format("Cooldown: %.1fs", cd)
+	end)
+
+	local tooltipName = Computed(scope, function(use)
+		return tostring(use(skillName) or "")
+	end)
+
+	local tooltipDesc = Computed(scope, function(use)
+		return tostring(use(description) or "")
+	end)
+
 	return scope:New("Frame")({
 		Size = UDim2.new(0, 50, 0, 50),
 		BackgroundColor3 = Color3.fromRGB(30, 30, 30),
@@ -186,16 +201,18 @@ local function SkillSlot(scope, props)
 			-- Tooltip
 			Tooltip(scope, {
 				Visible = isHovered,
-				Name = skillName,
-				Description = description,
-				Cooldown = cooldownDuration,
+				Name = tooltipName,
+				Description = tooltipDesc,
+				CooldownText = cooldownText,
 			}),
 
 			-- Icon
 			scope:New("ImageLabel")({
 				Size = UDim2.fromScale(1, 1),
 				BackgroundTransparency = 1,
-				Image = icon,
+				Image = Computed(scope, function(use)
+					return tostring(use(icon) or "")
+				end),
 				ImageColor3 = Computed(scope, function(use)
 					-- Special tint for active TripWire
 					if props.Slot == "Skill1" and use(props.ClassName) == "Scrapper" then
@@ -293,6 +310,35 @@ function SkillBar.new(classController): () -> ()
 		end)
 	end
 
+	-- Hoist every getSkillProp call to construction time so the returned
+	-- Computed is created ONCE and reused. Calling getSkillProp() inside a
+	-- Computed processor creates a new Computed on every re-evaluation, which
+	-- Fusion 0.3 correctly flags as a possiblyOutlives memory leak.
+	local passiveName     = getSkillProp("Passive",   "Name")
+	local passiveIcon     = getSkillProp("Passive",   "Icon")
+	local passiveCooldown = getSkillProp("Passive",   "Cooldown")
+	local passiveDesc     = getSkillProp("Passive",   "Description")
+
+	local secondaryName     = getSkillProp("Secondary", "Name")
+	local secondaryIcon     = getSkillProp("Secondary", "Icon")
+	local secondaryCooldown = getSkillProp("Secondary", "Cooldown")
+	local secondaryDesc     = getSkillProp("Secondary", "Description")
+
+	local skill1Name     = getSkillProp("Skill1", "Name")
+	local skill1Icon     = getSkillProp("Skill1", "Icon")
+	local skill1Cooldown = getSkillProp("Skill1", "Cooldown")
+	local skill1Desc     = getSkillProp("Skill1", "Description")
+
+	local skill2Name     = getSkillProp("Skill2", "Name")
+	local skill2Icon     = getSkillProp("Skill2", "Icon")
+	local skill2Cooldown = getSkillProp("Skill2", "Cooldown")
+	local skill2Desc     = getSkillProp("Skill2", "Description")
+
+	local dashName     = getSkillProp("Dash", "Name")
+	local dashIcon     = getSkillProp("Dash", "Icon")
+	local dashCooldown = getSkillProp("Dash", "Cooldown")
+	local dashDesc     = getSkillProp("Dash", "Description")
+
 	local screenGui = scope:New("ScreenGui")({
 		Name = "SkillBarGui",
 		Parent = playerGui,
@@ -318,16 +364,16 @@ function SkillBar.new(classController): () -> ()
 						BackgroundTransparency = 1,
 						AutomaticSize = Enum.AutomaticSize.XY,
 						Visible = Computed(scope, function(use)
-							return use(getSkillProp("Passive", "Name")) ~= nil
+							return use(passiveName) ~= nil
 						end),
 						[Children] = {
 							SkillSlot(scope, {
 								Slot = "Passive",
 								ClassName = currentClassName,
-								SkillName = getSkillProp("Passive", "Name"),
-								Icon = getSkillProp("Passive", "Icon"),
-								Cooldown = getSkillProp("Passive", "Cooldown"),
-								Description = getSkillProp("Passive", "Description"),
+								SkillName = passiveName,
+								Icon = passiveIcon,
+								Cooldown = passiveCooldown,
+								Description = passiveDesc,
 								Keybind = "PASSIVE",
 							}),
 						},
@@ -338,16 +384,16 @@ function SkillBar.new(classController): () -> ()
 						BackgroundTransparency = 1,
 						AutomaticSize = Enum.AutomaticSize.XY,
 						Visible = Computed(scope, function(use)
-							return use(getSkillProp("Secondary", "Name")) ~= nil
+							return use(secondaryName) ~= nil
 						end),
 						[Children] = {
 							SkillSlot(scope, {
 								Slot = "Secondary",
 								ClassName = currentClassName,
-								SkillName = getSkillProp("Secondary", "Name"),
-								Icon = getSkillProp("Secondary", "Icon"),
-								Cooldown = getSkillProp("Secondary", "Cooldown"),
-								Description = getSkillProp("Secondary", "Description"),
+								SkillName = secondaryName,
+								Icon = secondaryIcon,
+								Cooldown = secondaryCooldown,
+								Description = secondaryDesc,
 								Keybind = "M2",
 							}),
 						},
@@ -358,16 +404,16 @@ function SkillBar.new(classController): () -> ()
 						BackgroundTransparency = 1,
 						AutomaticSize = Enum.AutomaticSize.XY,
 						Visible = Computed(scope, function(use)
-							return use(getSkillProp("Skill1", "Name")) ~= nil
+							return use(skill1Name) ~= nil
 						end),
 						[Children] = {
 							SkillSlot(scope, {
 								Slot = "Skill1",
 								ClassName = currentClassName,
-								SkillName = getSkillProp("Skill1", "Name"),
-								Icon = getSkillProp("Skill1", "Icon"),
-								Cooldown = getSkillProp("Skill1", "Cooldown"),
-								Description = getSkillProp("Skill1", "Description"),
+								SkillName = skill1Name,
+								Icon = skill1Icon,
+								Cooldown = skill1Cooldown,
+								Description = skill1Desc,
 								Keybind = "E",
 							}),
 						},
@@ -378,16 +424,16 @@ function SkillBar.new(classController): () -> ()
 						BackgroundTransparency = 1,
 						AutomaticSize = Enum.AutomaticSize.XY,
 						Visible = Computed(scope, function(use)
-							return use(getSkillProp("Skill2", "Name")) ~= nil
+							return use(skill2Name) ~= nil
 						end),
 						[Children] = {
 							SkillSlot(scope, {
 								Slot = "Skill2",
 								ClassName = currentClassName,
-								SkillName = getSkillProp("Skill2", "Name"),
-								Icon = getSkillProp("Skill2", "Icon"),
-								Cooldown = getSkillProp("Skill2", "Cooldown"),
-								Description = getSkillProp("Skill2", "Description"),
+								SkillName = skill2Name,
+								Icon = skill2Icon,
+								Cooldown = skill2Cooldown,
+								Description = skill2Desc,
 								Keybind = "R",
 							}),
 						},
@@ -398,16 +444,16 @@ function SkillBar.new(classController): () -> ()
 						BackgroundTransparency = 1,
 						AutomaticSize = Enum.AutomaticSize.XY,
 						Visible = Computed(scope, function(use)
-							return use(getSkillProp("Dash", "Name")) ~= nil
+							return use(dashName) ~= nil
 						end),
 						[Children] = {
 							SkillSlot(scope, {
 								Slot = "Dash",
 								ClassName = currentClassName,
-								SkillName = getSkillProp("Dash", "Name"),
-								Icon = getSkillProp("Dash", "Icon"),
-								Cooldown = getSkillProp("Dash", "Cooldown"),
-								Description = getSkillProp("Dash", "Description"),
+								SkillName = dashName,
+								Icon = dashIcon,
+								Cooldown = dashCooldown,
+								Description = dashDesc,
 								Keybind = "SHIFT",
 							}),
 						},

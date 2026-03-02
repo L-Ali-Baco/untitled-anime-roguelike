@@ -164,6 +164,10 @@ function BaseEnemy.new(
 	self:_setupAnimator()
 	self:_registerAttributes()
 
+	-- Tag the model so ComicShaderController (client) discovers it via CollectionService.
+	-- This fires on every enemy spawn regardless of which subclass constructs it.
+	CollectionService:AddTag(self.Model, "Enemy")
+
 	return self
 end
 
@@ -943,7 +947,7 @@ function BaseEnemy:Tick(_dt: number)
 			self.State = AIState.Chase
 			self.AggroTime = now
 			if self.WalkTrack and not self.WalkTrack.IsPlaying then
-				self.WalkTrack:Play()
+				self.WalkTrack:Play(0.3)
 			end
 		end
 

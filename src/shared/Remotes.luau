@@ -78,6 +78,28 @@ local REMOTE_EVENTS = {
 	"GoldChanged", -- Server -> Client: player's new gold total (number)
 	"GoldPickup", -- Server -> Client: gold amount collected from an orb (number) — for audio/VFX
 	"ChestOpened", -- Server -> AllClients: { ChestModel: Model, ItemKey: string, Rarity: string }
+
+	-- HexCaster Projectile
+	-- Server -> AllClients: { HitPosition: Vector3, IsGroundHit: boolean }
+	-- Tells EnemyVFXController to play the impact splash at HitPosition.
+	-- IsGroundHit = true  → add a puddle glow pulse.
+	-- IsGroundHit = false → player-body splash only.
+	"ToxicBlobImpact",
+
+	-- HexCaster Heavy Attack (Hex-Beam)
+	-- Server -> AllClients: CFrame of the caster's HRP at wind-up start.
+	-- Tells EnemyVFXController to show the 0.88 s telegraph warning box.
+	"HexBeamTelegraph",
+
+	-- Server -> AllClients: CFrame of the caster's HRP at fire moment.
+	-- Tells EnemyVFXController to play the beam flash + screen shake.
+	"HexBeamFire",
+
+	-- BogShambler Headbutt Attack (Mud Slam)
+	-- Server -> AllClients: Vector3 impactPos (3 studs forward of HRP, at ground level).
+	-- Tells EnemyVFXController to play mud shards + shockwave ring + screen shake.
+	-- Fires at the exact moment of hitstop (AnimationTrack.Speed → 0).
+	"BogSlamImpact",
 }
 
 local REMOTE_FUNCTIONS = {

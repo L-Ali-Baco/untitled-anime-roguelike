@@ -32,9 +32,9 @@ local ObjectPool = require(Shared:WaitForChild("ObjectPool"))
 -- Gold value dropped per enemy type on death.
 -- Design intent: rarer enemies (lower SpawnWeight) drop more gold.
 -- SpawnWeight reference from EnemyConfig:
---   Minion(60) Shooter/MossFrog(15) Brute(7) Keg(3)
+--   BogShambler(60) Shooter/MossFrog(15) Brute(7) Keg(3)
 local GOLD_DROP_TABLE: { [string]: number } = {
-	Minion = 2,
+	BogShambler = 2,
 	Shooter = 8,
 	MossFrog = 8,
 	Brute = 15,

@@ -52,9 +52,12 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 -- ── Constants ─────────────────────────────────────────────────────────────────
 
--- Number of Actor workers. Each actor runs on its own OS thread.
--- Diminishing returns beyond the physical core count of the server.
-local NUM_ACTORS: number = 4
+-- Hard ceiling on Worker Actors. Actors each create a Luau VM — every Actor
+-- beyond this limit would add ~4–8 MB of VM overhead for negligible throughput
+-- gain. 16 saturates the thread pool on Roblox's cloud servers (typically 4–8
+-- physical cores with hyper-threading). Never exceed this regardless of how
+-- many Actor instances are found in the Actors folder.
+local MAX_ACTORS: number = 16
 
 -- How often (seconds) we recompute targets. AI decisions don't need
 -- sub-frame precision — once every 0.1 s (6 Heartbeats at 60 Hz) is plenty.
@@ -104,14 +107,37 @@ function ParallelTargetingService:Init()
 
 	-- Locate the Actors folder.
 	-- Structure: ServerScriptService > Server > Actors > TargetingActor1..N
-	local actorsFolder = ServerScriptService:FindFirstChild("Server")
-		and ServerScriptService.Server:FindFirstChild("Actors")
-	assert(actorsFolder, "[ParallelTargetingService] Missing ServerScriptService.Server.Actors folder.")
+	--
+	-- If the folder is missing or contains no Actor instances, the service
+	-- degrades gracefully: _computeTargets becomes a no-op and GetTarget returns
+	-- nil so EnemyService falls back to its direct distance calculation.
+	-- See SETUP REQUIRED IN STUDIO at the top of this file to fix this properly.
+	local serverFolder = ServerScriptService:FindFirstChild("Server")
+	local actorsFolder = serverFolder and serverFolder:FindFirstChild("Actors")
 
-	-- Collect all Actor instances and send them the Init message.
+	if not actorsFolder then
+		warn(
+			"[ParallelTargetingService] Missing ServerScriptService.Server.Actors folder. "
+				.. "Parallel targeting disabled — see file header for setup instructions."
+		)
+		return
+	end
+
+	-- Collect Actor instances up to MAX_ACTORS. Capping here enforces the Luau-VM
+	-- ceiling: extra Actors in the folder are ignored rather than silently
+	-- creating additional VMs and burning RAM.
 	local index = 0
 	for _, child in actorsFolder:GetChildren() do
 		if child:IsA("Actor") then
+			if index >= MAX_ACTORS then
+				warn(string.format(
+					"[ParallelTargetingService] Found more than MAX_ACTORS (%d) Actor instances. "
+						.. "Ignoring '%s' and any beyond it. Remove unused Actors to save memory.",
+					MAX_ACTORS,
+					child.Name
+				))
+				break
+			end
 			index += 1
 			_actors[index] = child :: Actor
 			-- Send the SharedTable and actor index to the actor's Init handler.
@@ -120,23 +146,25 @@ function ParallelTargetingService:Init()
 		end
 	end
 
-	assert(
-		#_actors > 0,
-		"[ParallelTargetingService] No Actor instances found in Actors folder."
-	)
-	assert(
-		#_actors == NUM_ACTORS,
-		string.format(
-			"[ParallelTargetingService] Expected %d actors, found %d. Update NUM_ACTORS or add/remove actors.",
-			NUM_ACTORS,
-			#_actors
+	if #_actors == 0 then
+		warn(
+			"[ParallelTargetingService] Actors folder exists but contains no Actor instances. "
+				.. "Parallel targeting disabled — see file header for setup instructions."
 		)
-	)
+		return
+	end
+
+	print(string.format("[ParallelTargetingService] Using %d/%d Worker Actors.", #_actors, MAX_ACTORS))
 end
 
 -- ── Start ─────────────────────────────────────────────────────────────────────
 
 function ParallelTargetingService:Start()
+	-- If Init() returned early because no Actors were found, skip the loop.
+	if #_actors == 0 then
+		return
+	end
+
 	-- Drive compute cycles via Heartbeat rather than a while loop.
 	-- Heartbeat is called after physics simulation, so enemy positions
 	-- reflect the latest physics state when we read them.

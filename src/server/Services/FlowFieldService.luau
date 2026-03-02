@@ -63,8 +63,11 @@ local FlowFieldService = {
 -- Tune these constants to match your map layout.
 
 -- Side length (in studs) of each square cell.
--- Smaller = finer paths + more BFS work. 4 studs ≈ 1 enemy body-width.
-local CELL_SIZE = 4
+-- 4 studs ≈ 1 enemy body-width (finer paths, larger RAM).
+-- 8 studs ≈ 2 body-widths (slightly coarser paths, 4× less RAM and BFS work).
+-- We use 8 to trade a small path-fidelity loss for a 4× reduction in costMap
+-- size (1024 cells vs 4096), halving peak RAM consumption.
+local CELL_SIZE = 8
 
 -- Map bounds: the grid covers [ORIGIN_X .. ORIGIN_X + WIDTH] × [ORIGIN_Z .. ORIGIN_Z + DEPTH].
 -- Default covers ±128 studs from the origin — adjust to your world size.
@@ -79,9 +82,18 @@ local GRID_ROWS = math.floor(DEPTH_STUDS / CELL_SIZE) -- Z axis (front ↔ back)
 local TOTAL_CELLS = GRID_COLS * GRID_ROWS
 
 -- How far the target player must move (studs) before we re-run BFS.
--- 4 studs = exactly 1 cell — the minimum meaningful change.
+-- 1 cell = the minimum meaningful change at the current resolution.
 -- Increase to reduce BFS frequency at the cost of slightly stale paths.
-local REGEN_THRESHOLD = CELL_SIZE -- 4 studs
+local REGEN_THRESHOLD = CELL_SIZE
+
+-- How many seconds a per-player flow field can sit without a RebuildForPlayer
+-- call before we consider it stale and drop it to free RAM.
+-- A flow field that hasn't been rebuilt in 10 s means no enemy has been
+-- chasing that player, so the data is safe to discard.
+local STALE_TIMEOUT = 10
+
+-- How often (seconds) the stale-cleanup sweep runs.
+local STALE_SWEEP_INTERVAL = 30
 
 -- ── Obstacle Baking Parameters ──────────────────────────────────────────────
 
@@ -114,7 +126,13 @@ local obstacle: { [number]: { [number]: boolean } } = {}
 -- Per-player flow data:
 --   costMap[col][row]  = integer step-distance from the player's cell (0 = player's cell)
 --   lastTargetPos      = the Vector3 used in the most recent BFS (for regen threshold check)
-local flowFields: { [Player]: { costMap: { [number]: { [number]: number } }, lastTargetPos: Vector3? } } = {}
+--   lastUpdateTime     = os.clock() at the last RebuildForPlayer call (for stale culling)
+--
+-- Weak keys (__mode = "k"): if a Player instance is GC'd (e.g. PlayerRemoving fires but
+-- the nil-set races with something), the entry is automatically collected. This is a
+-- belt-and-suspenders safety net on top of the PlayerRemoving cleanup in Start().
+local flowFields: { [Player]: { costMap: { [number]: { [number]: number } }, lastTargetPos: Vector3?, lastUpdateTime: number } } =
+	setmetatable({}, { __mode = "k" }) :: any
 
 -- Pre-allocated BFS queue (col, row pairs packed flat).
 -- Reused every BFS to avoid allocating a new table each time.
@@ -349,12 +367,13 @@ function FlowFieldService:RebuildForPlayer(player: Player, targetPos: Vector3)
 		for c = 1, GRID_COLS do
 			costMap[c] = {}
 		end
-		data = { costMap = costMap, lastTargetPos = nil }
+		data = { costMap = costMap, lastTargetPos = nil, lastUpdateTime = os.clock() }
 		flowFields[player] = data
 	end
 
 	_runBFS(col, row, data.costMap)
 	data.lastTargetPos = targetPos
+	data.lastUpdateTime = os.clock()
 end
 
 -- ── Public: ShouldRebuild ─────────────────────────────────────────────────────
@@ -515,6 +534,23 @@ function FlowFieldService:Start()
 	-- Clean up per-player flow field data when players leave to free memory.
 	Players.PlayerRemoving:Connect(function(player)
 		flowFields[player] = nil
+	end)
+
+	-- Stale-flow sweep: runs every STALE_SWEEP_INTERVAL seconds.
+	-- If a player's flow field hasn't been rebuilt in STALE_TIMEOUT seconds,
+	-- there are no enemies actively chasing them — drop the costMap to free RAM.
+	-- The next RebuildForPlayer call will lazily re-allocate it.
+	task.spawn(function()
+		while true do
+			task.wait(STALE_SWEEP_INTERVAL)
+			local now = os.clock()
+			for player, data in flowFields do
+				if (now - data.lastUpdateTime) > STALE_TIMEOUT then
+					-- Nil the entry; RebuildForPlayer re-creates it on next demand.
+					flowFields[player] = nil
+				end
+			end
+		end
 	end)
 
 	print("[FlowFieldService] Started — obstacle bake scheduled")

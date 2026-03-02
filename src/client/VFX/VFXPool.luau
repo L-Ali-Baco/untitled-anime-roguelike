@@ -48,6 +48,17 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ObjectPool = require(Shared:WaitForChild("ObjectPool"))
 
+-- Hardware tier — read at load time from PerformanceController.
+-- script.Parent = Client.VFX → .Parent = Client → .Core.PerformanceController
+local PerformanceController = require(script.Parent.Parent.Core.PerformanceController)
+
+-- Returns `mobile` when running on a phone/tablet, `full` otherwise.
+-- Used for every ObjectPool.new() call so pool RAM is halved on mobile,
+-- reducing peak heap usage by ~50% on devices with ≤3 GB RAM.
+local function poolSize(full: number, mobile: number): number
+	return if PerformanceController.IsMobile then mobile else full
+end
+
 -- ── Module ───────────────────────────────────────────────────────────────────
 
 local VFXPool = {}
@@ -141,8 +152,8 @@ function VFXPool:Init()
 	-- VFX code sets Color + Size before use.
 	_pools["MuzzleFlash"] = ObjectPool.new(
 		_makePart("MuzzleFlash", Enum.PartType.Ball, Enum.Material.Neon, Vector3.new(1.5, 1.5, 1.5)),
-		8, -- initialSize
-		8 -- expansionSize
+		poolSize(8, 4),
+		poolSize(8, 4)
 	)
 
 	-- ── BULLET TRACER ────────────────────────────────────────────────────
@@ -150,8 +161,8 @@ function VFXPool:Init()
 	-- CFrame to the midpoint facing the target.
 	_pools["Tracer"] = ObjectPool.new(
 		_makePart("BulletTracer", Enum.PartType.Block, Enum.Material.Neon, Vector3.new(0.15, 0.15, 1)),
-		20,
-		10
+		poolSize(20, 10),
+		poolSize(10, 5)
 	)
 
 	-- ── HIT SPARK ────────────────────────────────────────────────────────
@@ -159,8 +170,8 @@ function VFXPool:Init()
 	-- VFX code MUST: GetPart → set CFrame → Anchored=false → AssemblyLinearVelocity.
 	_pools["HitSpark"] = ObjectPool.new(
 		_makePart("HitSpark", Enum.PartType.Ball, Enum.Material.Neon, Vector3.new(0.1, 0.1, 0.1)),
-		48,
-		16
+		poolSize(48, 20),
+		poolSize(16, 8)
 	)
 
 	-- ── HIT FLASH ────────────────────────────────────────────────────────
@@ -168,8 +179,8 @@ function VFXPool:Init()
 	-- Used for melee hits, bullet impacts, finisher pulses.
 	_pools["HitFlash"] = ObjectPool.new(
 		_makePart("HitFlash", Enum.PartType.Ball, Enum.Material.Neon, Vector3.new(0.8, 0.8, 0.8)),
-		20,
-		10
+		poolSize(20, 10),
+		poolSize(10, 5)
 	)
 
 	-- ── IMPACT RING ──────────────────────────────────────────────────────
@@ -178,16 +189,16 @@ function VFXPool:Init()
 	-- Used for BOTH the outer and inner rings (two GetPart() calls per finisher).
 	_pools["ImpactRing"] = ObjectPool.new(
 		_makePart("ImpactRing", Enum.PartType.Cylinder, Enum.Material.Neon, Vector3.new(0.5, 0.1, 0.5)),
-		10,
-		6
+		poolSize(10, 5),
+		poolSize(6, 3)
 	)
 
 	-- ── SLASH TRAIL ──────────────────────────────────────────────────────
 	-- Flat block for melee slash arcs; VFX code sets Size + CFrame.
 	_pools["SlashTrail"] = ObjectPool.new(
 		_makePart("SlashTrail", Enum.PartType.Block, Enum.Material.Neon, Vector3.new(4, 0.1, 0.5)),
-		12,
-		6
+		poolSize(12, 6),
+		poolSize(6, 3)
 	)
 
 	-- ── LIGHTNING BEAM ───────────────────────────────────────────────────
@@ -196,8 +207,8 @@ function VFXPool:Init()
 	-- High initial count because chain procs can fire many bounces simultaneously.
 	_pools["LightningBeam"] = ObjectPool.new(
 		_makePart("LightningBeam", Enum.PartType.Block, Enum.Material.Neon, Vector3.new(0.08, 0.08, 1)),
-		40,
-		20
+		poolSize(40, 16),
+		poolSize(20, 8)
 	)
 
 	-- ── EXPLOSION SPHERE ─────────────────────────────────────────────────
@@ -205,8 +216,8 @@ function VFXPool:Init()
 	-- VFX code tweens Size outward and Transparency → 1 over 0.4 s.
 	_pools["ExplosionSphere"] = ObjectPool.new(
 		_makePart("ExplosionSphere", Enum.PartType.Ball, Enum.Material.Neon, Vector3.new(2, 2, 2)),
-		6,
-		4
+		poolSize(6, 3),
+		poolSize(4, 2)
 	)
 
 	-- ── EXPLOSION DEBRIS ─────────────────────────────────────────────────
@@ -215,8 +226,8 @@ function VFXPool:Init()
 	-- 64 slots: 8 shards × 8 simultaneous VolatileCasing explosions at 50 stacks.
 	_pools["ExplosionDebris"] = ObjectPool.new(
 		_makePart("ExplosionDebris", Enum.PartType.Block, Enum.Material.Wood, Vector3.new(0.5, 1.5, 0.2)),
-		64,
-		16
+		poolSize(64, 24),
+		poolSize(16, 8)
 	)
 
 	-- ── HIT SPARK EMITTER ────────────────────────────────────────────────
@@ -247,8 +258,8 @@ function VFXPool:Init()
 			Vector2.new(50, 50),
 			5
 		),
-		20,
-		10
+		poolSize(20, 10),
+		poolSize(10, 5)
 	)
 
 	print("[VFXPool] Initialized —", #(function()

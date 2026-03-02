@@ -85,7 +85,7 @@ end
 ]]
 local function pickWeightedEnemyType(): string
 	if totalSpawnWeight == 0 or #weightedSpawnPool == 0 then
-		return "Minion" -- safe fallback if config is empty
+		return "BogShambler" -- safe fallback if config is empty
 	end
 	local roll = math.random() * totalSpawnWeight
 	for _, entry in weightedSpawnPool do
