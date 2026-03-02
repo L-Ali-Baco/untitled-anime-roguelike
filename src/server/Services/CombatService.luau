@@ -43,8 +43,11 @@ local playerLastAttackId: { [Player]: string } = {}
 
 -- Track hits per attack to prevent duplicate damage
 local attackHitTargets: { [string]: { [Model]: boolean } } = {}
--- OPTIMIZATION: Centralized queue for attack cleanup to reduce scheduler overhead
-local activeAttacks: { { id: string, expiry: number } } = {}
+-- OPTIMIZATION: O(1) FIFO queue for attack cleanup using head/tail pointers.
+-- table.move (O(n)) replaced with pointer advance; pointers reset when queue drains.
+local activeAttacks: { [number]: { id: string, expiry: number } } = {}
+local activeAttacksHead = 1
+local activeAttacksTail = 0
 
 -- Track combo state per player to prevent sequence exploits (e.g. skipping to attack 3)
 local playerComboState: { [Player]: { CurrentIndex: number, LastAttackTime: number } } = {}
@@ -514,9 +517,9 @@ local function onRequestAttack(player: Player, attackIndex: number, targetOrTarg
 		playerComboState[player].LastAttackTime = os.clock()
 	end
 
-	-- Cleanup attack hit tracking after a short delay
-	-- OPTIMIZATION: Use centralized queue instead of task.delay to reduce scheduler overhead
-	table.insert(activeAttacks, { id = attackId, expiry = os.clock() + 1 })
+	-- Enqueue for cleanup (O(1) tail-append)
+	activeAttacksTail = activeAttacksTail + 1
+	activeAttacks[activeAttacksTail] = { id = attackId, expiry = os.clock() + 1 }
 end
 
 -- ============================================================================
@@ -718,8 +721,9 @@ local function onRequestRangedHit(
 	end
 
 	-- Cleanup attack hit tracking after a short delay
-	-- OPTIMIZATION: Use centralized queue instead of task.delay to reduce scheduler overhead
-	table.insert(activeAttacks, { id = attackId, expiry = os.clock() + 0.5 })
+	-- Enqueue for cleanup (O(1) tail-append)
+	activeAttacksTail = activeAttacksTail + 1
+	activeAttacks[activeAttacksTail] = { id = attackId, expiry = os.clock() + 0.5 }
 end
 
 --[[
@@ -811,40 +815,26 @@ function CombatService:Start()
 	print("[CombatService] Starting...")
 
 	-- Start cleanup loop
-	-- OPTIMIZATION: Batch cleanup operations to reduce scheduler overhead
+	-- OPTIMIZATION: O(1) FIFO drain — advance head pointer instead of table.move shift.
 	RunService.Heartbeat:Connect(function()
-		-- Skip when nothing to clean up (avoids busy-loop between fights)
-		if #activeAttacks == 0 then
-			return
+		if activeAttacksHead > activeAttacksTail then
+			return -- queue empty
 		end
 		local now = os.clock()
-		local removeCount = 0
-
-		-- Count how many items to remove (FIFO)
-		for _, entry in ipairs(activeAttacks) do
-			if now >= entry.expiry then
-				-- Cleanup hit tracking data
+		while activeAttacksHead <= activeAttacksTail do
+			local entry = activeAttacks[activeAttacksHead]
+			if entry and now >= entry.expiry then
 				attackHitTargets[entry.id] = nil
-				removeCount += 1
+				activeAttacks[activeAttacksHead] = nil -- clear reference
+				activeAttacksHead = activeAttacksHead + 1
 			else
-				-- If oldest entry hasn't expired, newer ones won't either (assuming FIFO insertion)
-				break
+				break -- oldest hasn't expired; newer won't have either
 			end
 		end
-
-		if removeCount > 0 then
-			local newSize = #activeAttacks - removeCount
-			if newSize > 0 then
-				-- Shift remaining items to the front (O(n) instead of O(k*n))
-				table.move(activeAttacks, removeCount + 1, #activeAttacks, 1)
-				-- Clear the old slots at the end
-				for i = newSize + 1, #activeAttacks do
-					activeAttacks[i] = nil
-				end
-			else
-				-- List is empty, just clear it
-				table.clear(activeAttacks)
-			end
+		-- Reset pointers when queue fully drains to prevent index growth
+		if activeAttacksHead > activeAttacksTail then
+			activeAttacksHead = 1
+			activeAttacksTail = 0
 		end
 	end)
 
