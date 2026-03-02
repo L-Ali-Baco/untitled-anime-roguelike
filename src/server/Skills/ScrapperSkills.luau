@@ -89,7 +89,7 @@ function ScrapperSkills.TripWireSpool(player: Player, skillData: any, target: Mo
 	activeTripWires[player] = {
 		StartNode = startNode,
 		StartPos = aimPos,
-		StartTime = tick(),
+		StartTime = os.clock(),
 	}
 end
 
@@ -320,7 +320,7 @@ function ScrapperSkills.TripWireEnd(player: Player, aimPos: Vector3?)
 							CombatService.ApplyDamage(
 								player,
 								bModel,
-								"TripWire_" .. tostring(tick()),
+								"TripWire_" .. tostring(os.clock()),
 								SkillConfig.Scrapper.Skill1.Damage,
 								SkillConfig.Scrapper.Skill1.Knockback,
 								false

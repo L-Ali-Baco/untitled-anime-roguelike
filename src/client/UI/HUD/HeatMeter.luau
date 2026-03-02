@@ -68,7 +68,7 @@ function HeatMeter.new(): () -> ()
 	local barColor = Computed(scope, function(use)
 		if use(isMaxHeat) then
 			-- Flash rapid red/orange when fully charged
-			local time = tick() * 10
+			local time = os.clock() * 10
 			local flash = math.abs(math.sin(time))
 			return Color3.fromRGB(255, 50 + (100 * flash), 50)
 		end

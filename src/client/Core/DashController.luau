@@ -356,13 +356,13 @@ local function performDash()
 	if classData and classData.DashOverride then
 		-- Can we slide?
 		local slideCooldownEnd = LocalPlayer:GetAttribute("DashCooldownEnd") or 0
-		if tick() >= slideCooldownEnd then
+		if os.clock() >= slideCooldownEnd then
 			isSlide = true
 			for k, v in pairs(classData.DashOverride) do
 				currentDashConfig[k] = v
 			end
 		else
-			print("[DashController] Slide on cooldown, doing normal dash. Remaining:", slideCooldownEnd - tick())
+			print("[DashController] Slide on cooldown, doing normal dash. Remaining:", slideCooldownEnd - os.clock())
 		end
 	end
 	print("[DashController] Class:", currentClass, "isSlide:", isSlide, "hasDashOverride:", classData and classData.DashOverride ~= nil)
@@ -398,7 +398,7 @@ local function performDash()
 	cleanupActiveDash(false)
 
 	if isSlide and currentClass == "Scrapper" then
-		LocalPlayer:SetAttribute("DashCooldownEnd", tick() + currentDashConfig.Cooldown)
+		LocalPlayer:SetAttribute("DashCooldownEnd", os.clock() + currentDashConfig.Cooldown)
 	end
 
 	-- Update state

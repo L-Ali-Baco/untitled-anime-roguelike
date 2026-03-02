@@ -34,7 +34,7 @@ local overheatEndTime = 0
 -- State: Trip-Wire
 local isSpooling = false
 local spoolStartPos = nil
-local spoolStartTime = 0 -- tick() when Phase 1 began; guards against instant double-fire
+local spoolStartTime = 0 -- os.clock() when Phase 1 began; guards against instant double-fire
 local spoolWireVisual = nil
 local skill1CooldownEnd = 0
 
@@ -56,16 +56,16 @@ local function updateHeat(deltaTime: number, rootPart: BasePart)
 		heatCharge = maxHeat
 
 		-- Check if the buff window has expired
-		if tick() >= overheatEndTime then
+		if os.clock() >= overheatEndTime then
 			isOverheating = false
 			heatCharge = 0
 			LocalPlayer:SetAttribute("HeatCharge", 0)
-			LocalPlayer:SetAttribute("HeatResetTime", tick() + 2.5)
+			LocalPlayer:SetAttribute("HeatResetTime", os.clock() + 2.5)
 		end
 	else
 		-- Check if we are in the post-shred reset cooldown period
 		local resetTime = LocalPlayer:GetAttribute("HeatResetTime") or 0
-		if tick() < resetTime then
+		if os.clock() < resetTime then
 			heatCharge = 0
 			LocalPlayer:SetAttribute("HeatCharge", 0)
 			return
@@ -83,7 +83,7 @@ local function updateHeat(deltaTime: number, rootPart: BasePart)
 		-- Check if we just hit max heat
 		if heatCharge >= maxHeat then
 			isOverheating = true
-			overheatEndTime = tick() + 5.0 -- 5 second duration
+			overheatEndTime = os.clock() + 5.0 -- 5 second duration
 		end
 	end
 
@@ -204,7 +204,7 @@ local function onSkill1Pressed()
 
 	if not isSpooling then
 		-- Check cooldown before allowing start
-		if tick() < skill1CooldownEnd then
+		if os.clock() < skill1CooldownEnd then
 			return
 		end
 
@@ -221,7 +221,7 @@ local function onSkill1Pressed()
 
 		-- Start Spooling
 		isSpooling = true
-		spoolStartTime = tick() -- record when Phase 1 began for the minimum time gate
+		spoolStartTime = os.clock() -- record when Phase 1 began for the minimum time gate
 		LocalPlayer:SetAttribute("TripWireSpooling", true)
 		-- The server laser aims 1.8 studs OFF the exact ground hit, so we store this
 		-- specifically as the starting CFrame calculation anchor
@@ -252,7 +252,7 @@ function ScrapperSkillController:EndTripWire(rootPart: BasePart?)
 	-- Phase 1 started. This is the primary fix for the "instant double-wire" bug:
 	-- a rapid second press (or a ghost double-fire on mobile) is silently ignored
 	-- and the player remains in spooling state.
-	if tick() - spoolStartTime < MIN_SPOOL_HOLD_TIME then
+	if os.clock() - spoolStartTime < MIN_SPOOL_HOLD_TIME then
 		return
 	end
 
@@ -370,12 +370,12 @@ function ScrapperSkillController:Start()
 				if currentClass == "Scrapper" and not isOverheating then
 					-- Check if we are in cooldown
 					local resetTime = LocalPlayer:GetAttribute("HeatResetTime") or 0
-					if tick() >= resetTime then
+					if os.clock() >= resetTime then
 						local maxHeat = ClassConfig.Scrapper.Skills.KineticScrubber.MaxHeat
 						heatCharge = math.min(maxHeat, heatCharge + amount)
 						if heatCharge >= maxHeat then
 							isOverheating = true
-							overheatEndTime = tick() + 5.0
+							overheatEndTime = os.clock() + 5.0
 						end
 						LocalPlayer:SetAttribute("HeatCharge", heatCharge)
 					end
@@ -391,7 +391,7 @@ function ScrapperSkillController:Start()
 			connections,
 			usedRemote.OnClientEvent:Connect(function(player, slot, data)
 				if player == LocalPlayer and slot == "Skill1" then
-					skill1CooldownEnd = tick() + data.Cooldown
+					skill1CooldownEnd = os.clock() + data.Cooldown
 				end
 			end)
 		)
@@ -403,7 +403,7 @@ function ScrapperSkillController:Start()
 			connections,
 			cdRemote.OnClientEvent:Connect(function(slot, remaining)
 				if slot == "Skill1" then
-					skill1CooldownEnd = tick() + remaining
+					skill1CooldownEnd = os.clock() + remaining
 				end
 			end)
 		)

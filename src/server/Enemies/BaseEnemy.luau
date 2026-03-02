@@ -135,9 +135,9 @@ function BaseEnemy.new(
 	-- ── Vertical movement (Jumping / Falling / Landing) ───────────────────────
 	-- XZ velocity locked during airborne states so Separation can't deflect mid-arc.
 	self._jumpTrajectory = Vector2.zero
-	-- tick() expiry for the Falling grace period (don't check landing immediately).
+	-- os.clock() expiry for the Falling grace period (don't check landing immediately).
 	self._fallingGraceEnd = 0
-	-- tick() expiry for the Landing recovery animation.
+	-- os.clock() expiry for the Landing recovery animation.
 	self._landRecoveryEnd = 0
 	-- Throttle: only run JumpController probes at JUMP_CHECK_INTERVAL Hz.
 	self._lastJumpCheckTime = 0
@@ -442,7 +442,7 @@ function BaseEnemy:_onLand()
 	end
 
 	local recoveryTime: number = self.Config.LandRecoveryTime or 0
-	self._landRecoveryEnd = tick() + recoveryTime
+	self._landRecoveryEnd = os.clock() + recoveryTime
 
 	-- If there's no recovery time, go straight back to Chase.
 	if recoveryTime <= 0 then
@@ -498,7 +498,7 @@ function BaseEnemy:MoveTowardTarget(targetPos: Vector3)
 	-- Unstuck detection: if moving but not progressing, jump over obstacle
 	local needsNewMove = (not self.LastMoveTarget) or (targetPos - self.LastMoveTarget).Magnitude > 2
 	if self.IsMoving then
-		local now = tick()
+		local now = os.clock()
 		if not self.LastPos then
 			self.LastPos = currentPos
 			self.LastPosTime = now
@@ -623,7 +623,7 @@ function BaseEnemy:ApplyHitstun(duration: number?)
 			self._services.notifyAttackEnd(self.Target)
 		end
 	end
-	self.HitstunEndTime = tick() + hitstunDuration
+	self.HitstunEndTime = os.clock() + hitstunDuration
 
 	self.IsMoving = false
 	self.LastMoveTarget = nil
@@ -777,7 +777,7 @@ function BaseEnemy:_doStandardAttack(attackData: { [string]: any }?)
 
 		-- I-frame check
 		local iframeExpiry = self._services.getIFrameExpiry(target)
-		if iframeExpiry and tick() < iframeExpiry then
+		if iframeExpiry and os.clock() < iframeExpiry then
 			self._services.blockDamage(target, self.Model, targetRoot.Position, attackDamage)
 			return
 		end
@@ -813,9 +813,9 @@ end
 ]]
 function BaseEnemy:_applySpeedCurve(track: AnimationTrack, duration: number, curve: { { number } })
 	task.spawn(function()
-		local startTime = tick()
-		while tick() - startTime < duration do
-			local t = math.clamp((tick() - startTime) / duration, 0, 1)
+		local startTime = os.clock()
+		while os.clock() - startTime < duration do
+			local t = math.clamp((os.clock() - startTime) / duration, 0, 1)
 			local speed = curve[1][2]
 			for i = 1, #curve - 1 do
 				local k0, k1 = curve[i], curve[i + 1]
@@ -914,7 +914,7 @@ function BaseEnemy:Tick(_dt: number)
 		return
 	end
 
-	local now = tick()
+	local now = os.clock()
 	local oldState = self.State
 	local config = self.Config
 

@@ -138,10 +138,10 @@ function HUDController:TriggerCooldownUI(parentFrame: Frame, duration: number)
 	-- stutters under heavy frame time (the Tween and the label are independent).
 	local timerLabel = overlay:FindFirstChild("CooldownTimer") :: TextLabel?
 	if timerLabel then
-		local startTime = tick()
+		local startTime = os.clock()
 		local conn: RBXScriptConnection
 		conn = RunService.Heartbeat:Connect(function()
-			local remaining = duration - (tick() - startTime)
+			local remaining = duration - (os.clock() - startTime)
 			if remaining <= 0 then
 				timerLabel.Text = ""
 				conn:Disconnect()

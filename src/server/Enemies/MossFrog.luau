@@ -70,7 +70,7 @@ function MossFrog:OnChaseOverride(targetPos: Vector3, distance: number): boolean
 		return false
 	end
 
-	local now = tick()
+	local now = os.clock()
 	if now - self.LastAttackTime < (config.AttackCooldown or 3.0) then
 		return false
 	end

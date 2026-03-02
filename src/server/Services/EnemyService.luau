@@ -41,7 +41,7 @@ local EnemyService = {
 local activeEnemies: { [Model]: any } = {}
 
 -- I-frame expiry timestamps: set when player starts a dodge
--- Stored as tick() timestamps — server-side, tamper-proof
+-- Stored as os.clock() timestamps — server-side, tamper-proof
 local playerIFrames: { [Player]: number } = {}
 local playerLastDash: { [Player]: number } = {}
 
@@ -150,7 +150,7 @@ local function buildServicesBag(): any
 		-- Rate-limited: fires at most once per 0.1 s per enemy, and only when state changes.
 		-- Dead state bypasses the rate limit so death VFX always fires.
 		fireEnemyStateChanged = function(model: Model, state: string)
-			local now = tick()
+			local now = os.clock()
 			local isDead = state == "Dead"
 			if not isDead then
 				if lastSentState[model] == state then
@@ -194,7 +194,7 @@ local function buildServicesBag(): any
 			end
 		end,
 
-		-- Returns the I-frame expiry tick() for a player (nil = no I-frames active)
+		-- Returns the I-frame expiry os.clock() for a player (nil = no I-frames active)
 		getIFrameExpiry = function(player: Player): number?
 			return playerIFrames[player]
 		end,
@@ -445,7 +445,7 @@ function EnemyService:SpawnEnemy(enemyType: string, position: Vector3, parent: I
 	-- Activation delay: enemy stands frozen before AI activates
 	local activationDelay = (EnemyConfig.Spawn and EnemyConfig.Spawn.ActivationDelay) or 0
 	if activationDelay > 0 then
-		enemy._activationEndTime = tick() + activationDelay
+		enemy._activationEndTime = os.clock() + activationDelay
 	end
 
 	-- Register with MovementService for Boids separation
@@ -573,7 +573,7 @@ function EnemyService:Start()
 	if iframeRemote then
 		iframeRemote.OnServerEvent:Connect(function(player: Player, isDashing: boolean)
 			if isDashing then
-				local now = tick()
+				local now = os.clock()
 				local MIN_DASH_INTERVAL = 0.3 -- Server-side cooldown enforcement
 				local lastDash = playerLastDash[player] or 0
 				if now - lastDash < MIN_DASH_INTERVAL then
