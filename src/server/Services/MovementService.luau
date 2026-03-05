@@ -261,7 +261,13 @@ end
 -- LIFECYCLE
 -- ============================================================
 
+
+function MovementService:GetGrid()
+	return enemyGrid
+end
+
 function MovementService:Init()
+
 	print("[MovementService] Initializing...")
 end
 
