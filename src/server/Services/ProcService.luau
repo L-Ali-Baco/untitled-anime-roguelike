@@ -22,6 +22,7 @@ local CombatLib = require(Shared:WaitForChild("Lib"):WaitForChild("CombatLib"))
 
 local MathUtil = require(Shared:WaitForChild("Lib"):WaitForChild("MathUtil"))
 local ItemService = require(script.Parent.ItemService)
+local MovementService = require(script.Parent.MovementService)
 
 local ProcService = {
 	Name = "ProcService",
@@ -79,7 +80,7 @@ local function triggerChainLightning(
 	local radius = procData.Radius or 20
 	-- Extra stacks increase chain count (more satisfying than raw damage)
 	local maxChain = math.min(3 + (stackCount - 1), 10) -- caps at 10 chains
-	local enemies = CombatLib.getEnemiesInRadius(primaryTarget:GetPivot().Position, radius, { primaryTarget })
+	local enemies = CombatLib.getEnemiesInRadius(primaryTarget:GetPivot().Position, radius, { primaryTarget }, MovementService:GetGrid())
 
 	-- ── Build bounce segment list for VFX ──────────────────────────────────
 	-- Each segment is a {From, To} pair representing one lightning arc.
@@ -136,7 +137,7 @@ local function triggerExplosion(
 	local baseDamage = StatLib:GetStat(attacker, "Damage", 10, inventory) * (CombatConfig.Server.DamageMultiplier or 1)
 
 	local pos = deadTarget:GetPivot().Position
-	local enemies = CombatLib.getEnemiesInRadius(pos, radius, { deadTarget })
+	local enemies = CombatLib.getEnemiesInRadius(pos, radius, { deadTarget }, MovementService:GetGrid())
 
 	for _, enemy in enemies do
 		EnemyLib:TakeDamage(enemy, baseDamage * damageMult)
