@@ -37,6 +37,30 @@ end
 -- Minimum seconds between ledge/gap probes per enemy (throttles raycast frequency).
 local JUMP_CHECK_INTERVAL = 0.35
 
+-- OPTIMIZATION: Cache active player characters to avoid O(N) array allocation
+-- from Players:GetPlayers() in high-frequency AI idle ticks.
+local cachedPlayerCharacters: { Player } = {}
+local function rebuildPlayerCache()
+	local list = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			table.insert(list, p)
+		end
+	end
+	cachedPlayerCharacters = list
+end
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(rebuildPlayerCache)
+	player.CharacterRemoving:Connect(rebuildPlayerCache)
+end)
+Players.PlayerRemoving:Connect(rebuildPlayerCache)
+-- Initialize cache and hook up events for players already in the server
+for _, player in ipairs(Players:GetPlayers()) do
+	player.CharacterAdded:Connect(rebuildPlayerCache)
+	player.CharacterRemoving:Connect(rebuildPlayerCache)
+end
+rebuildPlayerCache()
+
 -- ============================================================
 -- EXPORTED CONSTANTS
 -- ============================================================
@@ -846,7 +870,8 @@ function BaseEnemy:_getNearestPlayer(range: number): Player?
 	local nearestDist = range
 	local myPos = self.RootPart.Position
 
-	for _, player in Players:GetPlayers() do
+	-- Iterate over the cached players instead of calling Players:GetPlayers()
+	for _, player in ipairs(cachedPlayerCharacters) do
 		local char = player.Character
 		if not char then
 			continue
