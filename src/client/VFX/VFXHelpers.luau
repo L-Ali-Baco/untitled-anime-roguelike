@@ -160,6 +160,13 @@ function VFXHelpers.tweenAndCleanup(
 	Debris:AddItem(instance, cleanupTime)
 end
 
+-- OPTIMIZATION: Cache RaycastParams and throttle the reconstruction of the exclusion list.
+-- Rebuilding the array every frame/hit creates O(N) allocation overhead per raycast.
+local cachedGroundRayParams = RaycastParams.new()
+cachedGroundRayParams.FilterType = Enum.RaycastFilterType.Exclude
+local lastExcludeListUpdate = -math.huge
+local EXCLUDE_LIST_UPDATE_INTERVAL = 1.0
+
 --[[
     Client-side raycast to find the ground position below a point.
     Excludes enemies and player characters to hit only terrain/map geometry.
@@ -168,18 +175,20 @@ end
     @return Vector3 - ground position (or original position as fallback)
 ]]
 function VFXHelpers.findGroundPos(position: Vector3): Vector3
-	local rayParams = RaycastParams.new()
-	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-	local excludeList = CollectionService:GetTagged("Enemy")
-	for _, player in Players:GetPlayers() do
-		if player.Character then
-			table.insert(excludeList, player.Character)
+	local now = os.clock()
+	if now - lastExcludeListUpdate > EXCLUDE_LIST_UPDATE_INTERVAL then
+		lastExcludeListUpdate = now
+		local excludeList = CollectionService:GetTagged("Enemy")
+		for _, player in Players:GetPlayers() do
+			if player.Character then
+				table.insert(excludeList, player.Character)
+			end
 		end
+		cachedGroundRayParams.FilterDescendantsInstances = excludeList
 	end
-	rayParams.FilterDescendantsInstances = excludeList
 
 	local rayOrigin = position + Vector3.new(0, 10, 0)
-	local rayResult = workspace:Raycast(rayOrigin, Vector3.new(0, -30, 0), rayParams)
+	local rayResult = workspace:Raycast(rayOrigin, Vector3.new(0, -30, 0), cachedGroundRayParams)
 	return if rayResult then rayResult.Position + Vector3.new(0, 0.05, 0) else position
 end
 
