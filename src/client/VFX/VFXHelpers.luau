@@ -160,26 +160,40 @@ function VFXHelpers.tweenAndCleanup(
 	Debris:AddItem(instance, cleanupTime)
 end
 
+-- Cached parameters for findGroundPos to prevent O(N) allocation on the hot path
+local cachedGroundRayParams = RaycastParams.new()
+cachedGroundRayParams.FilterType = Enum.RaycastFilterType.Exclude
+local lastGroundRayUpdate = -math.huge
+
 --[[
     Client-side raycast to find the ground position below a point.
     Excludes enemies and player characters to hit only terrain/map geometry.
+
+    ⚡ Bolt Optimization:
+    The exclude list and RaycastParams are now cached and rebuilt only once per second.
+    This converts an O(N) allocation (where N = enemies + players) per raycast
+    to O(1) for the vast majority of calls, drastically reducing GC pressure.
 
     @param position Vector3 - the reference position
     @return Vector3 - ground position (or original position as fallback)
 ]]
 function VFXHelpers.findGroundPos(position: Vector3): Vector3
-	local rayParams = RaycastParams.new()
-	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-	local excludeList = CollectionService:GetTagged("Enemy")
-	for _, player in Players:GetPlayers() do
-		if player.Character then
-			table.insert(excludeList, player.Character)
+	-- Rebuild the exclusion list at most once per second
+	local now = os.clock()
+	if now - lastGroundRayUpdate >= 1.0 then
+		lastGroundRayUpdate = now
+
+		local excludeList = CollectionService:GetTagged("Enemy")
+		for _, player in Players:GetPlayers() do
+			if player.Character then
+				table.insert(excludeList, player.Character)
+			end
 		end
+		cachedGroundRayParams.FilterDescendantsInstances = excludeList
 	end
-	rayParams.FilterDescendantsInstances = excludeList
 
 	local rayOrigin = position + Vector3.new(0, 10, 0)
-	local rayResult = workspace:Raycast(rayOrigin, Vector3.new(0, -30, 0), rayParams)
+	local rayResult = workspace:Raycast(rayOrigin, Vector3.new(0, -30, 0), cachedGroundRayParams)
 	return if rayResult then rayResult.Position + Vector3.new(0, 0.05, 0) else position
 end
 
