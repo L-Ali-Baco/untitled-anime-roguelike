@@ -85,9 +85,9 @@ local _sharedOutput: SharedTable
 -- Used to match results to the correct batch and discard stale data.
 local _batchId: number = 0
 
--- Result cache: maps enemyId (number) -> { playerId: number, distSq: number }
+-- Result cache: maps enemyId (number) -> { player: Player, distSq: number }
 -- Written by _processResults(), read by GetTarget().
-local _targetCache: { [number]: { playerId: number, distSq: number } } = {}
+local _targetCache: { [number]: { player: Player, distSq: number } } = {}
 
 -- Timer accumulator for the compute interval.
 local _timer: number = 0
@@ -352,8 +352,9 @@ function ParallelTargetingService:_computeTargets()
 				-- Write to the cache. This is read by EnemyService on the main
 				-- thread — the write happens here on the main thread too (we're
 				-- past task.synchronize() in the actor), so no race condition.
+				-- Map closestPlayerId back to the actual Player object
 				_targetCache[enemyId] = {
-					playerId = closestPlayerId, -- 1-based index into activePlayers
+					player = playerIdMap[closestPlayerId],
 					distSq = closestDistSq,
 				}
 			end
@@ -385,11 +386,10 @@ function ParallelTargetingService:GetTarget(enemyId: number): (Player?, number)
 		return nil, math.huge
 	end
 
-	-- Resolve the player from the ID. Players may have disconnected since the
-	-- last compute cycle, so we validate before returning.
-	local activePlayers = Players:GetPlayers()
-	local player = activePlayers[cached.playerId]
-	if not player or not player.Character then
+	-- ⚡ Bolt: Use cached Player instance to avoid O(N) Players:GetPlayers() allocation
+	-- on every call. Validate the player is still active and has a character.
+	local player = cached.player
+	if not player or not player.Parent or not player.Character then
 		return nil, math.huge
 	end
 
