@@ -663,8 +663,8 @@ local function onRequestRangedHit(
 		local hitRadius = config.Radius
 		local shredAmount = config.ShredAmount
 
-		rebuildIgnoreList()
-
+		-- ⚡ Bolt: removed redundant rebuildIgnoreList() here.
+		-- cachedOverlapParams is automatically maintained by PlayerAdded/CharacterAdded events (O(1) fetch vs O(N) rebuild on every hit).
 		local blastParts = workspace:GetPartBoundsInRadius(hitPosition, hitRadius, cachedOverlapParams)
 		local hitEnemies = {}
 
@@ -752,8 +752,9 @@ local function onRequestDashHit(player: Player, targetModel: Model?)
 	if rootPart and targetRoot then
 		-- Distance tolerance for slide hits
 		if (rootPart.Position - targetRoot.Position).Magnitude <= 20 then
-			rebuildIgnoreList()
 
+			-- ⚡ Bolt: removed redundant rebuildIgnoreList() here.
+			-- cachedOverlapParams is automatically maintained by PlayerAdded/CharacterAdded events (O(1) fetch vs O(N) rebuild on every hit).
 			local blastParts = workspace:GetPartBoundsInRadius(targetRoot.Position, config.AOERadius, cachedOverlapParams)
 			local hitEnemies = {}
 			local enemiesStruck = 0
